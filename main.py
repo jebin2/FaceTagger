@@ -17,6 +17,8 @@ from detect_manager import DetectManager
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+EXTRACT_FACES_FOLDER = "extracted_faces"
+
 class VideoProcessor:
 	def __init__(self, detect_manager: DetectManager, num_workers=None):
 		self.detect_manager = detect_manager
@@ -36,7 +38,7 @@ class VideoProcessor:
 			raise ValueError("detect_manager must be an instance of DetectManager")
 
 		# --- Directory Setup ---
-		faces_dir = Path("extracted_faces")
+		faces_dir = Path(EXTRACT_FACES_FOLDER)
 		if faces_dir.exists():
 			shutil.rmtree(faces_dir)
 		faces_dir.mkdir(parents=True, exist_ok=True)
@@ -82,8 +84,8 @@ class VideoProcessor:
 
 		data_clean = convert_np(all_face_data)
 		# --- Save metadata ---
-		with open(metadata_file, 'w') as f:
-			json.dump(data_clean, f, indent=2)
+		# with open(metadata_file, 'w') as f:
+		# 	json.dump(data_clean, f, indent=2)
 
 		logger.info(f"Extraction complete: {len(all_face_data)} faces saved to '{faces_dir}'")
 		return all_face_data
@@ -383,13 +385,13 @@ def optimized_clustering_pipeline(faces_data, max_workers=None):
 	"""Run clustering algorithms in parallel where possible"""
 	from group_face import (cluster_with_hdbscan, cluster_with_spectral, 
 						   cluster_with_adaptive_similarity, cluster_with_agglomerative, 
-						   cluster_with_affinity_propagation, cluster_with_chinese_whispers)
+						   cluster_with_affinity_propagation, cluster_with_chinese_whispers, compare_and_group_faces_with_fr)
 	
 	face_encodings = [face['embedding'] for face in faces_data if face['embedding'] is not None]
 	
-	if not face_encodings:
-		logger.warning("No face embeddings found for clustering")
-		return
+	# if not face_encodings:
+	# 	logger.warning("No face embeddings found for clustering")
+	# 	return
 	
 	# Convert to numpy array for better performance
 	face_encodings = np.array(face_encodings)
@@ -401,6 +403,7 @@ def optimized_clustering_pipeline(faces_data, max_workers=None):
 		("agglomerative", lambda: cluster_with_agglomerative(face_encodings)),
 		("affinity_propagation", lambda: cluster_with_affinity_propagation(face_encodings)),
 		("chinese_whispers", lambda: cluster_with_chinese_whispers(face_encodings)),
+		# ("compare_and_group_faces_with_fr", lambda: compare_and_group_faces_with_fr(EXTRACT_FACES_FOLDER)),
 	]
 
 	# Some algorithms can run in parallel, others are already multi-threaded
@@ -436,7 +439,7 @@ def optimized_clustering_pipeline(faces_data, max_workers=None):
 if __name__ == "__main__":
 	# --- Configuration ---
 	video_path = "input.mp4"
-	detect_type = "insight_face"
+	detect_type = "face_recognition"
 	
 	# Performance settings
 	frame_skip = 100  # Increased for faster processing
@@ -445,6 +448,7 @@ if __name__ == "__main__":
 	min_face_size = 40  # Filter small faces
 	quality_threshold = 0.6  # Filter low-quality detections
 	use_gpu_decode = False  # Disable GPU decode to avoid format issues
+	num_workers = None
 	
 	# --- Select Detector ---
 	if detect_type == "insight_face":
@@ -453,19 +457,21 @@ if __name__ == "__main__":
 	elif detect_type == "face_recognition":
 		from face_recognition_manager import FaceRecognitionManager
 		detect_manager = FaceRecognitionManager(model='cnn')
-	elif detect_type == "mediapipe":
-		from mediapipe_face_manager import MediaPipeFaceManager
-		detect_manager = MediaPipeFaceManager(model_selection=1, min_detection_confidence=0.5)
-	elif detect_type == "yolo":
-		from yolo_person_manager import YOLOPersonManager
-		detect_manager = YOLOPersonManager(conf_threshold=0.5)
+	# elif detect_type == "mediapipe": # worst
+	# 	from mediapipe_face_manager import MediaPipeFaceManager
+	# 	detect_manager = MediaPipeFaceManager(model_selection=1, min_detection_confidence=0.7)
+	# elif detect_type == "yolo": # not good
+	# 	num_workers = 1
+	# 	from yolo_person_manager import YOLOPersonManager
+	# 	detect_manager = YOLOPersonManager(conf_threshold=0.7)
 	else:
 		raise ValueError(f"Unknown detect_type: {detect_type}")
 
 	# --- Run Optimized Pipeline ---
-	processor = VideoProcessor(detect_manager)
+	processor = VideoProcessor(detect_manager, num_workers=num_workers)
 	
 	start_total = time.time()
+	faces_data = []
 	faces_data = processor.extract_faces_from_video_optimized(
 		video_path, 
 		frame_skip=frame_skip,
@@ -475,9 +481,8 @@ if __name__ == "__main__":
 		quality_threshold=quality_threshold,
 		use_gpu_decode=use_gpu_decode
 	)
-	
-	if faces_data:
-		optimized_clustering_pipeline(faces_data)
+
+	optimized_clustering_pipeline(faces_data)
 	
 	total_elapsed = time.time() - start_total
 	logger.info(f"\nTotal pipeline completed in {total_elapsed:.2f} seconds")

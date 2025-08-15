@@ -28,3 +28,5 @@ ultralytics>=8.0.0
 # Use the CPU version to avoid CUDA conflicts unless specifically needed:
 # If you have a GPU, install the appropriate pytorch from pytorch.org
 torch>=2.0.0
+
+git+https://github.com/jebin2/browser_manager.git
