@@ -1,0 +1,30 @@
+# Core Libraries
+numpy>=1.20.0
+opencv-python>=4.5.0
+opencv-python-headless==4.12.0.88
+scikit-learn>=1.7.1
+matplotlib>=3.4.0 # Optional, but useful for visualizations
+
+# Clustering Libraries
+hdbscan>=0.8.29
+dlib==20.0.0 # Specific version for compatibility
+
+# Face Recognition Libraries
+face-recognition>=1.3.0 # Requires dlib
+mediapipe>=0.8.9 # Used for MediaPipeFaceManager
+
+# InsightFace
+insightface>=0.7.0
+# Note: insightface requires onnxruntime. 
+# Use onnxruntime for CPU:
+onnxruntime>=1.15.0
+# Use onnxruntime-gpu for GPU (requires compatible CUDA):
+# onnxruntime-gpu>=1.15.0 # If you have a GPU and suitable CUDA setup
+
+# YOLO
+ultralytics>=8.0.0
+
+# Torch (required by Ultralytics and InsightFace for certain operations, and generally for ML)
+# Use the CPU version to avoid CUDA conflicts unless specifically needed:
+# If you have a GPU, install the appropriate pytorch from pytorch.org
+torch>=2.0.0
