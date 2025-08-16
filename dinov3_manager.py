@@ -55,17 +55,37 @@ class FaceDINOManager(DetectManager):
         with torch.inference_mode():
             outputs = self.model(**inputs)
 
-        features = outputs.last_hidden_state
-        if self.use_patch_features:
-            # Average over patch features
-            patch_features = features[:, 1:, :]  # exclude CLS
-            embedding = torch.mean(patch_features, dim=1).squeeze().numpy()
+        # Use pooler_output instead of raw features
+        if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+            embedding = outputs.pooler_output.squeeze().numpy()
         else:
-            # CLS token
-            cls_features = features[:, 0, :]
-            embedding = cls_features.squeeze().numpy()
+            # Fallback to your current approach
+            features = outputs.last_hidden_state
+            if self.use_patch_features:
+                patch_features = features[:, 1:, :]
+                embedding = torch.mean(patch_features, dim=1).squeeze().numpy()
+            else:
+                cls_features = features[:, 0, :]
+                embedding = cls_features.squeeze().numpy()
 
         return embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
+
+    def add_padding_to_bbox(self, bbox, img_shape, padding_ratio=0.15):
+        top, right, bottom, left = bbox
+        h, w = img_shape[:2]
+
+        # Calculate padding
+        pad_h = int((bottom - top) * padding_ratio)
+        pad_w = int((right - left) * padding_ratio)
+
+        # Expand and clip within image
+        top = max(0, top - pad_h)
+        bottom = min(h, bottom + pad_h)
+        left = max(0, left - pad_w)
+        right = min(w, right + pad_w)
+
+        return (top, right, bottom, left)
+
 
     def _detect_frame(self, frame):
         """
@@ -76,6 +96,7 @@ class FaceDINOManager(DetectManager):
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         face_locations = face_recognition.face_locations(rgb_frame, model=self.face_model)
+        face_locations = self.add_padding_to_bbox(face_locations, frame.shape, padding_ratio = 0)
 
         faces = []
         for (top, right, bottom, left) in face_locations:
