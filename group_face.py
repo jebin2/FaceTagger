@@ -47,7 +47,8 @@ def cluster_with_hdbscan(encodings, min_cluster_size=5, min_samples=3):
         min_cluster_size=min_cluster_size,
         min_samples=min_samples,
         metric='euclidean',
-        cluster_selection_method='eom'
+        cluster_selection_method='eom',
+        prediction_data=True
     )
     
     cluster_labels = clusterer.fit_predict(processed_encodings)
@@ -208,6 +209,40 @@ def compare_and_group_faces_with_fr(input_folder, tolerance=0.9):
 
             if match:
                 labels[j] = current_label
+
+        current_label += 1
+
+    return labels
+
+def get_similarity(encodings, threshold: float = 0.6):
+    """
+    Assign labels to face encodings based on cosine similarity.
+
+    Args:
+        encodings (list[np.ndarray]): List of normalized face embeddings.
+        threshold (float): Cosine similarity threshold to consider faces the same.
+
+    Returns:
+        list[int]: Cluster labels for each encoding.
+    """
+    if len(encodings) == 0:
+        return []
+
+    encodings_np = np.array(encodings)
+    n = len(encodings_np)
+    labels = [-1] * n
+    current_label = 0
+
+    for i in range(n):
+        if labels[i] != -1:
+            continue  # already labeled
+
+        labels[i] = current_label
+        for j in range(i + 1, n):
+            if labels[j] == -1:
+                similarity = float(np.dot(encodings_np[i], encodings_np[j]))
+                if similarity >= threshold:
+                    labels[j] = current_label
 
         current_label += 1
 

@@ -33,7 +33,6 @@ class InsightFaceManager(DetectManager):
 			face_data.append({
 				'bbox': (top, right, bottom, left),
 				'embedding': face.normed_embedding.tolist(),  # high-quality 512-d embedding
-				'normed_embedding  ': face.embedding.tolist()  # better for recognition
 			})
 		return face_data
 
