@@ -17,7 +17,8 @@ class FaceDINOManager(DetectManager):
 
     def __init__(self, 
                  face_model="cnn", 
-                 dinov3_model="facebook/dinov3-vits16-pretrain-lvd1689m", 
+                #  dinov3_model="facebook/dinov3-vits16-pretrain-lvd1689m", 
+                 dinov3_model="facebook/dinov3-vitl16-pretrain-lvd1689m", 
                  use_patch_features=False):
         super().__init__()
         self.face_model = face_model
@@ -26,6 +27,7 @@ class FaceDINOManager(DetectManager):
         self.processor = None
         self.model = None
         self._embedding_cache = {}  # 🔹 cache for embeddings
+        self._normalized_embedding_cache = {}  # 🔹 cache for embeddings
 
     def _get_embedding_from_cache(self, image_path):
         """Return cached embedding if exists, else compute & store"""
@@ -45,6 +47,38 @@ class FaceDINOManager(DetectManager):
             self.model = AutoModel.from_pretrained(self.dinov3_model)
             self.model.eval()
             print("FaceDINOManager ready.")
+
+    def _load_yolo_model(self):
+        from ultralytics import YOLO
+        """Load YOLO model for person detection."""
+        if not hasattr(self, "yolo_model") or self.yolo_model is None:
+            self.yolo_model = YOLO("yolo12m.pt")  # change path if needed
+
+    def get_person_bboxes(self, frame):
+        """
+        Detect persons using YOLO and return bounding boxes
+        in (top, right, bottom, left) format.
+        """
+        # Ensure YOLO model is loaded
+        self._load_yolo_model()
+
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        results = self.yolo_model.predict(rgb_frame, verbose=False)
+        bboxes = []
+
+        for result in results:
+            for box in result.boxes:
+                cls = int(box.cls[0])
+                if cls != 0:  # class 0 = person in COCO
+                    continue
+
+                # Convert xyxy -> (top, right, bottom, left)
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                top, right, bottom, left = y1, x2, y2, x1
+                bboxes.append((top, right, bottom, left))
+
+        return bboxes
 
     def _extract_dino_embedding(self, face_image):
         """Extract embedding from a cropped face using DINOv3"""
@@ -84,8 +118,7 @@ class FaceDINOManager(DetectManager):
         left = max(0, left - pad_w)
         right = min(w, right + pad_w)
 
-        return (top, right, bottom, left)
-
+        return top, right, bottom, left
 
     def _detect_frame(self, frame):
         """
@@ -95,11 +128,12 @@ class FaceDINOManager(DetectManager):
             self._load_model()
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        face_locations = face_recognition.face_locations(rgb_frame, model=self.face_model)
-        face_locations = self.add_padding_to_bbox(face_locations, frame.shape, padding_ratio = 0)
+        # face_locations = face_recognition.face_locations(rgb_frame, model=self.face_model)
+        face_locations = self.get_person_bboxes(frame)
 
         faces = []
         for (top, right, bottom, left) in face_locations:
+            top, right, bottom, left = self.add_padding_to_bbox((top, right, bottom, left), frame.shape, padding_ratio = 0)
             # Crop face
             face_crop = rgb_frame[top:bottom, left:right]
             if face_crop.size == 0:
@@ -159,19 +193,27 @@ class FaceDINOManager(DetectManager):
             self._load_model()
 
         # 🔹 Use cached embeddings
-        features1 = self._get_embedding_from_cache(image_path_1)
-        features2 = self._get_embedding_from_cache(image_path_2)
-
-        # Convert to tensors
-        features1 = torch.tensor(features1, dtype=torch.float32).unsqueeze(0)
-        features2 = torch.tensor(features2, dtype=torch.float32).unsqueeze(0)
-
-        # Normalize
-        features1_norm = torch.nn.functional.normalize(features1, p=2, dim=-1)
-        features2_norm = torch.nn.functional.normalize(features2, p=2, dim=-1)
+        features1_norm = self.get_normalized_embedding_from_cache(image_path_1)
+        features2_norm = self.get_normalized_embedding_from_cache(image_path_2)
 
         # Cosine similarity
-        similarity = torch.mm(features1_norm, features2_norm.T)
+        # similarity = torch.mm(features1_norm, features2_norm.T)
+        # Simple dot product since vectors are already normalized
+        # This is much faster than torch.mm for single comparisons
+        similarity = torch.dot(features1_norm.squeeze(), features2_norm.squeeze())
 
         return similarity.item()
 
+    def get_normalized_embedding_from_cache(self, image_path):
+        if image_path in self._normalized_embedding_cache:
+            return self._normalized_embedding_cache[image_path]
+
+        features = self._get_embedding_from_cache(image_path)
+
+        # Convert to tensors
+        features_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
+
+        # Normalize
+        features_norm = torch.nn.functional.normalize(features_tensor, p=2, dim=-1)
+        self._normalized_embedding_cache[image_path] = features_norm
+        return features_norm

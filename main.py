@@ -14,6 +14,7 @@ import logging
 from detect_manager import DetectManager
 from tqdm import tqdm
 import re
+import pickle
 
 # Configure logging for better progress tracking
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -84,6 +85,17 @@ class VideoProcessor:
 
 		# --- Directory Setup ---
 		faces_dir = Path(EXTRACT_FACES_FOLDER)
+		
+		metadata_file = faces_dir / 'face_metadata.pkl'
+		if metadata_file.exists() and metadata_file.stat().st_size > 0:
+			try:
+				with open(metadata_file, 'rb') as f:
+					return pickle.load(f)
+			except (EOFError, pickle.UnpicklingError):
+				logger.warning(f"Corrupted pickle file found at {metadata_file}, ignoring.")
+				# fall through and re-extract
+
+
 		if faces_dir.exists():
 			shutil.rmtree(faces_dir)
 		faces_dir.mkdir(parents=True, exist_ok=True)
@@ -121,22 +133,10 @@ class VideoProcessor:
 		)
 		
 		self.detect_manager.cleanup()
-		
-		def convert_np(obj):
-			if isinstance(obj, dict):
-				return {k: convert_np(v) for k, v in obj.items()}
-			elif isinstance(obj, list):
-				return [convert_np(x) for x in obj]
-			elif isinstance(obj, tuple):
-				return tuple(convert_np(x) for x in obj)
-			elif isinstance(obj, np.integer):
-				return int(obj)
-			elif isinstance(obj, np.floating):
-				return float(obj)
-			else:
-				return obj
 
-		data_clean = convert_np(all_face_data)
+		# --- Save metadata ---
+		with open(metadata_file, 'wb') as f:
+			pickle.dump(all_face_data, f)
 
 		logger.info(f"Extraction complete: {len(all_face_data)} faces saved to '{faces_dir}'")
 		return all_face_data
@@ -221,11 +221,20 @@ class VideoProcessor:
 
 		# --- Directory Setup ---
 		faces_dir = Path(EXTRACT_FACES_FOLDER)
+		
+		metadata_file = faces_dir / 'face_metadata.pkl'
+		if metadata_file.exists() and metadata_file.stat().st_size > 0:
+			try:
+				with open(metadata_file, 'rb') as f:
+					return pickle.load(f)
+			except (EOFError, pickle.UnpicklingError):
+				logger.warning(f"Corrupted pickle file found at {metadata_file}, ignoring.")
+				# fall through and re-extract
+
+
 		if faces_dir.exists():
 			shutil.rmtree(faces_dir)
 		faces_dir.mkdir(parents=True, exist_ok=True)
-		
-		metadata_file = faces_dir / 'face_metadata.json'
 		
 		logger.info(f"Starting optimized face extraction from '{video_path}'")
 		logger.info(f"Using {self.num_workers} workers, batch_size={batch_size}")
@@ -251,24 +260,10 @@ class VideoProcessor:
 		
 		cap.release()
 		self.detect_manager.cleanup()
-		def convert_np(obj):
-			if isinstance(obj, dict):
-				return {k: convert_np(v) for k, v in obj.items()}
-			elif isinstance(obj, list):
-				return [convert_np(x) for x in obj]
-			elif isinstance(obj, tuple):
-				return tuple(convert_np(x) for x in obj)
-			elif isinstance(obj, np.integer):
-				return int(obj)
-			elif isinstance(obj, np.floating):
-				return float(obj)
-			else:
-				return obj
 
-		data_clean = convert_np(all_face_data)
 		# --- Save metadata ---
-		# with open(metadata_file, 'w') as f:
-		# 	json.dump(data_clean, f, indent=2)
+		with open(metadata_file, 'wb') as f:
+			pickle.dump(all_face_data, f)
 
 		logger.info(f"Extraction complete: {len(all_face_data)} faces saved to '{faces_dir}'")
 		return all_face_data
@@ -684,7 +679,7 @@ def save_grouped_faces_optimized(face_data, labels, method_name):
 	logger.info(f"Each group contains both extracted faces and original frame files")
 
 
-def optimized_clustering_pipeline(faces_data, max_workers=None):
+def clustering_pipeline(faces_data, max_workers=None):
 	"""Run clustering algorithms in parallel where possible"""
 	from group_face import (cluster_with_hdbscan, cluster_with_spectral, 
 						   cluster_with_adaptive_similarity, cluster_with_agglomerative, 
@@ -737,14 +732,228 @@ def optimized_clustering_pipeline(faces_data, max_workers=None):
 	# Print summary
 	successful_runs = [r for r in results if r[1] is not None]
 	logger.info(f"Completed {len(successful_runs)}/{len(clustering_techniques)} clustering algorithms")
+
+	logger.info("Enhanced clustering pipeline completed")
 	for name, _, elapsed in successful_runs:
 		logger.info(f"  {name}: {elapsed:.2f}s")
+
+def calculate_face_quality_score(face_file: Path) -> float:
+	"""
+	Calculate comprehensive quality score for a face.
+	Considers: size, sharpness, contrast, face detection confidence.
+	"""
+	try:
+		img = cv2.imread(str(face_file))
+		if img is None:
+			return 0.0
+		
+		# Size score (larger faces generally better)
+		height, width = img.shape[:2]
+		size_score = min(1.0, (width * height) / (100 * 100))  # Normalize to 100x100
+		
+		# Sharpness score using Laplacian variance
+		gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+		laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+		sharpness_score = min(1.0, laplacian_var / 1000.0)  # Normalize
+		
+		# Contrast score
+		contrast_score = gray.std() / 127.5  # Normalize to 0-1
+		
+		# Brightness consistency (avoid over/under exposed)
+		mean_brightness = gray.mean()
+		brightness_score = 1.0 - abs(mean_brightness - 127.5) / 127.5
+		
+		# File size as proxy for quality (JPEG compression artifacts)
+		file_size = face_file.stat().st_size
+		size_score_file = min(1.0, file_size / 50000)  # Normalize to ~50KB
+		
+		# Weighted combination
+		total_score = (size_score * 0.3 + 
+						sharpness_score * 0.3 + 
+						contrast_score * 0.2 + 
+						brightness_score * 0.1 + 
+						size_score_file * 0.1)
+		
+		return total_score
+		
+	except Exception as e:
+		logger.warning(f"Error calculating quality for {face_file}: {e}")
+		return 0.0
+
+def regroup_person_folders(output_dir, detect_manager=None, similarity_threshold=0.7):
+	"""
+	Regroup person folders by merging similar faces.
+	
+	Args:
+		output_dir: Directory containing person_XXX folders
+		similarity_threshold: Minimum similarity to merge folders (default 0.7)
+		sample_size: Number of sample faces to use for comparison per folder
+	"""
+	output_path = Path(output_dir)
+	if not output_path.exists():
+		logger.error(f"Output directory does not exist: {output_dir}")
+		return
+	
+	# Get all person folders
+	person_folders = sorted([f for f in output_path.iterdir() 
+						   if f.is_dir() and f.name.startswith("person_")])
+	
+	if len(person_folders) < 2:
+		logger.info("Less than 2 person folders found, no regrouping needed")
+		return
+	
+	logger.info(f"Starting regrouping of {len(person_folders)} person folders")
+	
+	# Extract representative faces from each folder
+	folder_representatives = {}
+	for folder in person_folders:
+		representatives = get_representative_face_with_largest_area(folder)
+		if representatives:
+			folder_representatives[folder.name] = representatives
+	
+	# Track which folders have been merged
+	merged_folders = set()
+	merge_mapping = {}  # source_folder -> target_folder
+	
+	# Compare folders sequentially
+	folder_names = sorted(folder_representatives.keys())
+	
+	for i, current_folder in enumerate(folder_names):
+		if current_folder in merged_folders:
+			continue
+			
+		current_faces = folder_representatives[current_folder]
+		
+		# Compare with all subsequent folders
+		for j in range(i + 1, len(folder_names)):
+			compare_folder = folder_names[j]
+			
+			if compare_folder in merged_folders:
+				continue
+				
+			compare_faces = folder_representatives[compare_folder]
+			
+			# Calculate similarity between folders
+			max_similarity = detect_manager.compute_similarity(current_faces, compare_faces)
+			
+			if max_similarity >= similarity_threshold:
+				logger.info(f"Merging {compare_folder} into {current_folder} (similarity: {max_similarity:.3f})")
+				
+				# Mark for merging
+				merge_mapping[compare_folder] = current_folder
+				merged_folders.add(compare_folder)
+	
+	# Execute the merges
+	execute_folder_merges(output_path, merge_mapping)
+	
+	# Renumber remaining folders
+	renumber_person_folders(output_path)
+	
+	remaining_folders = len([f for f in output_path.iterdir() 
+						   if f.is_dir() and f.name.startswith("person_")])
+	
+	logger.info(f"Regrouping complete: {len(person_folders)} -> {remaining_folders} person folders")
+
+def get_representative_face_with_largest_area(folder_path):
+    """Get highest quality face instead of largest."""
+    folder_path = Path(folder_path)
+    face_files = list(folder_path.glob("*.jpg"))
+    
+    best_score = 0
+    best_file = None
+    
+    for face_file in face_files:
+        score = calculate_face_quality_score(face_file)  # From the artifact above
+        if score > best_score:
+            best_score = score
+            best_file = face_file
+    
+    return best_file
+
+def execute_folder_merges(output_path, merge_mapping):
+	"""
+	Execute the actual folder merges.
+	
+	Args:
+		output_path: Base output directory
+		merge_mapping: Dictionary of source_folder -> target_folder
+	"""
+	for source_folder, target_folder in merge_mapping.items():
+		source_path = output_path / source_folder
+		target_path = output_path / target_folder
+		
+		if not source_path.exists() or not target_path.exists():
+			logger.warning(f"Skipping merge: {source_folder} -> {target_folder} (folder not found)")
+			continue
+		
+		logger.info(f"Moving files from {source_folder} to {target_folder}")
+		
+		# Move all files from source to target
+		for item in source_path.iterdir():
+			if item.is_file():
+				# Handle filename conflicts
+				target_file = target_path / item.name
+				counter = 1
+				while target_file.exists():
+					stem = item.stem
+					suffix = item.suffix
+					target_file = target_path / f"{stem}_{counter:03d}{suffix}"
+					counter += 1
+				
+				shutil.move(str(item), str(target_file))
+			elif item.is_dir():
+				# Handle subdirectories (like original_frames)
+				target_subdir = target_path / item.name
+				if target_subdir.exists():
+					# Move contents if subdirectory already exists
+					for subitem in item.iterdir():
+						target_subfile = target_subdir / subitem.name
+						counter = 1
+						while target_subfile.exists():
+							stem = subitem.stem
+							suffix = subitem.suffix
+							target_subfile = target_subdir / f"{stem}_{counter:03d}{suffix}"
+							counter += 1
+						shutil.move(str(subitem), str(target_subfile))
+					item.rmdir()
+				else:
+					shutil.move(str(item), str(target_subdir))
+		
+		# Remove empty source folder
+		try:
+			source_path.rmdir()
+		except OSError:
+			logger.warning(f"Could not remove {source_path} (not empty)")
+
+def renumber_person_folders(output_path):
+	"""
+	Renumber person folders to be sequential (person_000, person_001, etc.)
+	
+	Args:
+		output_path: Base output directory
+	"""
+	person_folders = sorted([f for f in output_path.iterdir() 
+						   if f.is_dir() and f.name.startswith("person_")])
+	
+	for i, folder in enumerate(person_folders):
+		new_name = f"person_{i:03d}"
+		if folder.name != new_name:
+			new_path = output_path / new_name
+			# Handle conflicts
+			while new_path.exists():
+				i += 1
+				new_name = f"person_{i:03d}"
+				new_path = output_path / new_name
+			
+			logger.info(f"Renaming {folder.name} to {new_name}")
+			folder.rename(new_path)
 
 
 if __name__ == "__main__":
 	# --- Configuration ---
 	videoPath = "/home/jebineinstein/git/CaptionCreator/reuse/The Reader 2008_compressed/The Reader 2008_compressed_split_video_3.mp4"
-	source_path = "/home/jebineinstein/git/TextFrameAligner/temp_dir/frames/"  # Can be video file or frames folder
+	videoPath = "input.mkv"
+	source_path = "all_frames_dir"  # Can be video file or frames folder
 	detect_type = "dinov3"
 	
 	# Performance settings
@@ -797,8 +1006,39 @@ if __name__ == "__main__":
 		use_gpu_decode=use_gpu_decode
 	)
 
-	optimized_clustering_pipeline(faces_data)
-	
+	clustering_pipeline(faces_data)
+
+	# Perform regrouping
+	# logger.info("Starting post-clustering regrouping...")
+	# method_name="hdbscan"
+	# output_dir = f"output/{method_name}"
+	# regroup_person_folders(output_dir, detect_manager=detect_manager, similarity_threshold=0.9)
+
+	# Example usage with different methods and logging
+	from regroup_cluster import enhanced_regroup_person_folders
+	output_directory = "output/hdbscan"
+	log_directory = "logs"
+
+	# Create log directory
+	Path(log_directory).mkdir(exist_ok=True)
+
+	# Method 1: Multiple representatives with consensus
+	stats1 = enhanced_regroup_person_folders(
+		output_directory, 
+		detect_manager=FaceDINOManager(),  # Replace with your FaceDINOManager()
+		method="multiple_representatives",
+		log_file=f"{log_directory}/regrouping_multiple_reps.log",
+		num_representatives=1,
+	)
+
+	# Method 2: Quality-based regrouping
+	stats2 = enhanced_regroup_person_folders(
+		output_directory,
+		detect_manager=FaceDINOManager(),  # Replace with your FaceDINOManager()
+		method="temporal_context",
+		log_file=f"{log_directory}/regrouping_quality.log"
+	)
+
 	total_elapsed = time.time() - start_total
 	logger.info(f"\nTotal pipeline completed in {total_elapsed:.2f} seconds")
 	logger.info(f"Processed {len(faces_data)} faces")
