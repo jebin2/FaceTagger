@@ -11,7 +11,9 @@ from typing import List, Dict, Tuple, Optional
 import sys
 import time
 from datetime import datetime
+from tqdm import tqdm
 
+THRESHOLD = 0.9
 
 def setup_logging(log_level=logging.INFO, log_file=None):
     """
@@ -59,7 +61,7 @@ class ImprovedRegrouper:
     Enhanced face regrouping system with multiple strategies and comprehensive logging.
     """
     
-    def __init__(self, detect_manager, similarity_threshold=0.75, log_file=None):
+    def __init__(self, detect_manager, similarity_threshold=THRESHOLD, log_file=None):
         """
         Initialize the regrouper with comprehensive logging.
         
@@ -84,9 +86,7 @@ class ImprovedRegrouper:
             'processing_time': 0
         }
     
-    def regroup_with_multiple_representatives(self, output_dir: Path, 
-                                           num_representatives=5,
-                                           consensus_threshold=0.6):
+    def regroup_with_multiple_representatives(self, output_dir: Path, num_representatives=5, consensus_threshold=THRESHOLD):
         """
         Use multiple representative faces per folder for more robust comparison.
         
@@ -115,13 +115,13 @@ class ImprovedRegrouper:
         # Get multiple representatives per folder
         folder_representatives = {}
         for i, folder in enumerate(person_folders):
-            self.logger.info(f"Processing folder {i+1}/{len(person_folders)}: {folder.name}")
+            tqdm.write(f"Processing folder {i+1}/{len(person_folders)}: {folder.name}", end="\r")
             representatives = self._get_multiple_representatives(folder, num_representatives)
             if representatives:
                 folder_representatives[folder.name] = representatives
-                self.logger.info(f"Found {len(representatives)} representatives in {folder.name}")
+                tqdm.write(f"Found {len(representatives)} representatives in {folder.name}", end="\r")
             else:
-                self.logger.warning(f"No valid representatives found in {folder.name}")
+                tqdm.write(f"No valid representatives found in {folder.name}", end="\r")
         
         if len(folder_representatives) < 2:
             self.logger.warning("Not enough folders with valid representatives for regrouping")
@@ -139,6 +139,8 @@ class ImprovedRegrouper:
             self._execute_merges(output_dir, merge_mapping)
         else:
             self.logger.info("No merges identified")
+
+        self.check_unknown(output_dir, folder_representatives, consensus_threshold)
         
         processing_time = time.time() - start_time
         self.stats['processing_time'] = processing_time
@@ -149,139 +151,7 @@ class ImprovedRegrouper:
         self.logger.info(f"Total comparisons: {self.stats['total_comparisons']}")
         self.logger.info(f"Failed comparisons: {self.stats['failed_comparisons']}")
         self.logger.info("=" * 60)
-        
-    def regroup_with_quality_scoring(self, output_dir: Path):
-        """
-        Use quality-based selection of representative faces.
-        Consider face size, sharpness, frontality, and lighting.
-        """
-        start_time = time.time()
-        self.logger.info("STARTING QUALITY-BASED REGROUPING")
-        
-        person_folders = sorted([f for f in output_dir.iterdir() 
-                               if f.is_dir() and f.name.startswith("person_")])
-        
-        self.logger.info(f"Processing {len(person_folders)} folders with quality scoring")
-        
-        folder_representatives = {}
-        for folder in person_folders:
-            self.logger.debug(f"Analyzing quality in {folder.name}")
-            best_face = self._get_highest_quality_face(folder)
-            if best_face:
-                folder_representatives[folder.name] = [best_face]
-                self.logger.debug(f"Best quality face in {folder.name}: {best_face.name}")
-        
-        merge_mapping = self._find_merges_simple(folder_representatives)
-        self._execute_merges(output_dir, merge_mapping)
-        
-        self.logger.info(f"Quality-based regrouping completed in {time.time() - start_time:.2f} seconds")
-    
-    def regroup_with_adaptive_threshold(self, output_dir: Path):
-        """
-        Use adaptive thresholding based on cluster sizes and quality.
-        """
-        start_time = time.time()
-        self.logger.info("STARTING ADAPTIVE THRESHOLD REGROUPING")
-        
-        person_folders = sorted([f for f in output_dir.iterdir() 
-                               if f.is_dir() and f.name.startswith("person_")])
-        
-        # Calculate adaptive thresholds based on folder characteristics
-        self.logger.info("Calculating adaptive thresholds for each folder")
-        folder_info = {}
-        for folder in person_folders:
-            face_files = list(folder.glob("*.jpg"))
-            avg_quality = self._estimate_folder_quality(folder)
-            adaptive_threshold = self._calculate_adaptive_threshold(len(face_files), avg_quality)
-            
-            folder_info[folder.name] = {
-                'size': len(face_files),
-                'quality': avg_quality,
-                'threshold': adaptive_threshold
-            }
-            
-            self.logger.debug(f"{folder.name}: size={len(face_files)}, "
-                            f"quality={avg_quality:.3f}, threshold={adaptive_threshold:.3f}")
-        
-        # Get representatives
-        folder_representatives = {}
-        for folder in person_folders:
-            representatives = self._get_multiple_representatives(folder, 3)
-            if representatives:
-                folder_representatives[folder.name] = representatives
-        
-        # Find merges with adaptive thresholds
-        merge_mapping = self._find_merges_adaptive(folder_representatives, folder_info)
-        self._execute_merges(output_dir, merge_mapping)
-        
-        self.logger.info(f"Adaptive threshold regrouping completed in {time.time() - start_time:.2f} seconds")
-    
-    def regroup_with_embedding_clustering(self, output_dir: Path):
-        """
-        Re-cluster all faces using their embeddings to find better groupings.
-        This essentially re-does clustering but with post-processing insights.
-        """
-        start_time = time.time()
-        self.logger.info("STARTING EMBEDDING-BASED RE-CLUSTERING")
-        
-        # Collect all face embeddings with their current assignments
-        all_embeddings = []
-        face_to_folder = {}
-        folder_faces = defaultdict(list)
-        
-        person_folders = sorted([f for f in output_dir.iterdir() 
-                               if f.is_dir() and f.name.startswith("person_")])
-        
-        self.logger.info(f"Collecting embeddings from {len(person_folders)} folders")
-        
-        total_faces = 0
-        for folder in person_folders:
-            folder_face_count = 0
-            for face_file in folder.glob("*.jpg"):
-                # Get embedding for this face
-                embedding = self._get_face_embedding(face_file)
-                if embedding is not None:
-                    all_embeddings.append(embedding)
-                    face_to_folder[len(all_embeddings)-1] = folder.name
-                    folder_faces[folder.name].append((face_file, len(all_embeddings)-1))
-                    folder_face_count += 1
-                    total_faces += 1
-                else:
-                    self.logger.warning(f"Could not get embedding for {face_file}")
-            
-            self.logger.debug(f"Collected {folder_face_count} embeddings from {folder.name}")
-        
-        if not all_embeddings:
-            self.logger.error("No valid embeddings collected. Cannot proceed with re-clustering.")
-            return
-        
-        self.logger.info(f"Total embeddings collected: {len(all_embeddings)}")
-        
-        # Re-cluster using DBSCAN with optimized parameters
-        embeddings_array = np.array(all_embeddings)
-        
-        # Use cosine distance for face embeddings
-        self.logger.info("Calculating cosine distances between embeddings")
-        distances = 1 - cosine_similarity(embeddings_array)
-        
-        # Adaptive eps based on embedding distribution
-        eps = self._calculate_optimal_eps(distances)
-        self.logger.info(f"Using DBSCAN with eps={eps:.3f}")
-        
-        clustering = DBSCAN(eps=eps, min_samples=2, metric='precomputed')
-        new_labels = clustering.fit_predict(distances)
-        
-        unique_labels = set(new_labels)
-        n_clusters = len(unique_labels) - (1 if -1 in new_labels else 0)
-        n_noise = list(new_labels).count(-1)
-        
-        self.logger.info(f"DBSCAN results: {n_clusters} clusters, {n_noise} noise points")
-        
-        # Create new grouping based on clustering results
-        self._create_new_groupings(output_dir, face_to_folder, folder_faces, new_labels)
-        
-        self.logger.info(f"Embedding re-clustering completed in {time.time() - start_time:.2f} seconds")
-    
+
     def regroup_with_temporal_context(self, output_dir: Path):
         """
         Use temporal information (frame numbers/timestamps) to improve regrouping.
@@ -318,8 +188,7 @@ class ImprovedRegrouper:
         
         self.logger.info(f"Temporal context regrouping completed in {time.time() - start_time:.2f} seconds")
     
-    def _get_multiple_representatives(self, folder_path: Path, 
-                                    num_representatives: int) -> List[Path]:
+    def _get_multiple_representatives(self, folder_path: Path, num_representatives: int) -> List[Path]:
         """Get multiple representative faces using quality scoring."""
         face_files = list(folder_path.glob("*.jpg"))
         if not face_files:
@@ -336,7 +205,11 @@ class ImprovedRegrouper:
         
         # Sort by score and take top representatives
         face_scores.sort(key=lambda x: x[1], reverse=True)
-        representatives = [fs for fs in face_scores[:num_representatives]]
+        # representatives = [fs for fs in face_scores[:num_representatives]]
+        representatives = []
+        for fs in face_scores[:num_representatives]:
+            self.detect_manager.get_normalized_embedding_from_cache(str(fs[0]))
+            representatives.append(fs)
         
         self.logger.debug(f"Selected {len(representatives)} representatives from {folder_path.name}")
         if self.logger.isEnabledFor(logging.DEBUG):
@@ -394,8 +267,7 @@ class ImprovedRegrouper:
         representatives = self._get_multiple_representatives(folder_path, 1)
         return representatives[0] if representatives else None
     
-    def _find_merges_with_consensus(self, folder_representatives: Dict, 
-                                  consensus_threshold: float) -> Dict[str, str]:
+    def _find_merges_with_consensus(self, folder_representatives: Dict, consensus_threshold: float) -> Dict[str, str]:
         """Find merges using consensus voting from multiple representatives."""
         self.logger.info(f"Finding merges with consensus threshold: {consensus_threshold}")
         
@@ -415,10 +287,8 @@ class ImprovedRegrouper:
             for j in range(i + 1, len(folder_names)):
                 current_pair += 1
                 compare_folder = folder_names[j]
-                
-                if current_pair % 10 == 0:
-                    self.logger.info(f"Processing pair {current_pair}/{total_pairs}: "
-                                   f"{current_folder} vs {compare_folder}")
+
+                tqdm.write(f"Processing pair {current_pair}/{total_pairs}: "f"{current_folder} vs {compare_folder}", end="\r")
                 
                 if compare_folder in merged_folders:
                     continue
@@ -457,247 +327,186 @@ class ImprovedRegrouper:
         
         self.logger.info(f"Consensus analysis complete. Found {len(merge_mapping)} merges.")
         return merge_mapping
-    
-    def _find_merges_simple(self, folder_representatives: Dict) -> Dict[str, str]:
-        """Simple pairwise comparison for single representatives."""
-        self.logger.info("Finding merges with simple pairwise comparison")
+
+    def check_unknown(self, output_dir: Path, folder_representatives: Dict, consensus_threshold: float) -> Dict[str, str]:
+        """
+        Check unknown folders and move faces to the most similar person folders.
         
-        merge_mapping = {}
-        folder_names = sorted(folder_representatives.keys())
-        merged_folders = set()
+        Args:
+            output_dir: Directory containing person and unknown folders
+            folder_representatives: Dictionary mapping folder names to their representative faces
+            consensus_threshold: Minimum similarity threshold for moving faces
         
-        for i, current_folder in enumerate(folder_names):
-            if current_folder in merged_folders:
+        Returns:
+            Dictionary mapping moved files to their destination folders
+        """
+        self.logger.info("=" * 60)
+        self.logger.info("STARTING UNKNOWN FOLDER PROCESSING")
+        self.logger.info("=" * 60)
+        
+        # Find all unknown folders
+        unknown_folders = sorted([f for f in output_dir.iterdir() 
+                                if f.is_dir() and f.name.startswith("unknown")])
+        
+        if not unknown_folders:
+            self.logger.info("No unknown folders found")
+            return {}
+        
+        self.logger.info(f"Found {len(unknown_folders)} unknown folders")
+        
+        if not folder_representatives:
+            self.logger.warning("No folder representatives provided - cannot process unknown faces")
+            return {}
+        
+        moved_faces = {}
+        total_unknown_faces = 0
+        total_moved_faces = 0
+        
+        # Process each unknown folder
+        for unknown_folder in unknown_folders:
+            self.logger.info(f"Processing unknown folder: {unknown_folder.name}")
+            
+            # Get all face files from unknown folder
+            face_files = list(unknown_folder.glob("*.jpg")) + list(unknown_folder.glob("*.jpeg")) + list(unknown_folder.glob("*.png"))
+            
+            if not face_files:
+                self.logger.warning(f"No face files found in {unknown_folder.name}")
                 continue
             
-            current_face = folder_representatives[current_folder][0]
+            self.logger.info(f"Found {len(face_files)} faces in {unknown_folder.name}")
+            total_unknown_faces += len(face_files)
+            for face_file in tqdm(face_files, desc=f"Processing embedding"):
+                self.detect_manager.get_normalized_embedding_from_cache(str(face_file))
             
-            for j in range(i + 1, len(folder_names)):
-                compare_folder = folder_names[j]
-                if compare_folder in merged_folders:
-                    continue
+            # Process each face file
+            for face_file in tqdm(face_files, desc=f"Checking similarities"):
+                best_match_folder = None
+                best_similarity = 0.0
+                best_match_details = {}
                 
-                compare_face = folder_representatives[compare_folder][0]
-                similarity = self.detect_manager.compute_similarity(str(current_face[0]), str(compare_face[0]))
-                self.stats['total_comparisons'] += 1
-                
-                if similarity is not None and similarity >= self.similarity_threshold:
-                    self.logger.info(f"MERGE: {compare_folder} -> {current_folder} "
-                                   f"(similarity: {similarity:.3f})")
-                    merge_mapping[compare_folder] = current_folder
-                    merged_folders.add(compare_folder)
-                    self.stats['successful_merges'] += 1
-                elif similarity is None:
-                    self.stats['failed_comparisons'] += 1
-        
-        return merge_mapping
-    
-    def _calculate_face_similarity(self, face1_path: Path, face2_path: Path) -> Optional[float]:
-        """Calculate similarity between two face images."""
-        try:
-            # Load images
-            img1 = cv2.imread(str(face1_path))
-            img2 = cv2.imread(str(face2_path))
-            
-            if img1 is None or img2 is None:
-                self.logger.warning(f"Could not load images: {face1_path} or {face2_path}")
-                return None
-            
-            # Get embeddings using the detect manager
-            embedding1 = self.detect_manager.get_embedding(img1)
-            embedding2 = self.detect_manager.get_embedding(img2)
-            
-            if embedding1 is None or embedding2 is None:
-                self.logger.warning(f"Could not get embeddings for {face1_path} or {face2_path}")
-                return None
-            
-            # Calculate cosine similarity
-            similarity = cosine_similarity([embedding1], [embedding2])[0][0]
-            return float(similarity)
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating similarity between {face1_path} and {face2_path}: {e}")
-            return None
-    
-    def _get_face_embedding(self, face_file: Path) -> Optional[np.ndarray]:
-        """Get face embedding from file."""
-        try:
-            img = cv2.imread(str(face_file))
-            if img is None:
-                return None
-            return self.detect_manager.get_embedding(img)
-        except Exception as e:
-            self.logger.error(f"Error getting embedding for {face_file}: {e}")
-            return None
-    
-    def _estimate_folder_quality(self, folder_path: Path) -> float:
-        """Estimate average quality of faces in folder."""
-        face_files = list(folder_path.glob("*.jpg"))[:10]  # Sample first 10
-        if not face_files:
-            return 0.0
-        
-        total_quality = 0
-        valid_scores = 0
-        
-        for face_file in face_files:
-            score = self._calculate_face_quality_score(face_file)
-            if score > 0:
-                total_quality += score
-                valid_scores += 1
-        
-        avg_quality = total_quality / valid_scores if valid_scores > 0 else 0.0
-        self.logger.debug(f"Average quality for {folder_path.name}: {avg_quality:.3f} "
-                        f"(from {valid_scores}/{len(face_files)} faces)")
-        
-        return avg_quality
-    
-    def _calculate_adaptive_threshold(self, folder_size: int, avg_quality: float) -> float:
-        """Calculate adaptive threshold based on folder characteristics."""
-        base_threshold = self.similarity_threshold
-        
-        # Larger folders can have lower threshold (more confident)
-        size_factor = max(0.9, 1.0 - (folder_size - 10) * 0.01)
-        
-        # Higher quality folders can have lower threshold
-        quality_factor = max(0.9, 2.0 - avg_quality)
-        
-        adaptive_threshold = base_threshold * size_factor * quality_factor
-        adaptive_threshold = max(0.6, min(0.9, adaptive_threshold))  # Clamp between 0.6 and 0.9
-        
-        self.logger.debug(f"Adaptive threshold calculation: base={base_threshold:.3f}, "
-                        f"size_factor={size_factor:.3f}, quality_factor={quality_factor:.3f}, "
-                        f"final={adaptive_threshold:.3f}")
-        
-        return adaptive_threshold
-    
-    def _find_merges_adaptive(self, folder_representatives: Dict, 
-                            folder_info: Dict) -> Dict[str, str]:
-        """Find merges using adaptive thresholds."""
-        self.logger.info("Finding merges with adaptive thresholds")
-        
-        merge_mapping = {}
-        folder_names = sorted(folder_representatives.keys())
-        merged_folders = set()
-        
-        for i, current_folder in enumerate(folder_names):
-            if current_folder in merged_folders:
-                continue
-            
-            current_faces = folder_representatives[current_folder]
-            current_threshold = folder_info[current_folder]['threshold']
-            
-            for j in range(i + 1, len(folder_names)):
-                compare_folder = folder_names[j]
-                if compare_folder in merged_folders:
-                    continue
-                
-                compare_faces = folder_representatives[compare_folder]
-                compare_threshold = folder_info[compare_folder]['threshold']
-                
-                # Use the more conservative (higher) threshold
-                threshold = max(current_threshold, compare_threshold)
-                
-                # Calculate max similarity
-                max_similarity = 0
-                valid_comparisons = 0
-                for curr_face in current_faces:
-                    for comp_face in compare_faces:
-                        sim = self.detect_manager.compute_similarity(str(curr_face[0]), str(comp_face[0]))
+                # Compare against all person folder representatives
+                for folder_name, representatives in folder_representatives.items():
+                    if not representatives:
+                        continue
+                    
+                    # Calculate similarities with all representatives in this folder
+                    similarities = []
+                    valid_comparisons = 0
+                    
+                    for representative_info in representatives:
+                        # representative_info is a tuple: (face_file_path, quality_score)
+                        representative_path = representative_info[0]
+                        
+                        # Calculate similarity between unknown face and representative
+                        similarity = self.detect_manager.compute_similarity(
+                            str(face_file), str(representative_path)
+                        )
+                        
                         self.stats['total_comparisons'] += 1
-                        if sim is not None:
-                            max_similarity = max(max_similarity, sim)
+                        
+                        if similarity is not None:
+                            similarities.append(similarity)
                             valid_comparisons += 1
                         else:
                             self.stats['failed_comparisons'] += 1
+                    
+                    if not similarities:
+                        self.logger.debug(f"No valid similarities calculated for {folder_name}")
+                        continue
+                    
+                    # Use maximum similarity for this folder
+                    max_similarity = max(similarities)
+                    avg_similarity = sum(similarities) / len(similarities)
+                    
+                    self.logger.debug(f"Face {face_file.name} vs {folder_name}: "
+                                f"max_sim={max_similarity:.3f}, avg_sim={avg_similarity:.3f}, "
+                                f"valid_comparisons={valid_comparisons}")
+                    
+                    # Update best match if this folder has higher similarity
+                    if max_similarity > best_similarity:
+                        best_similarity = max_similarity
+                        best_match_folder = folder_name
+                        best_match_details = {
+                            'max_similarity': max_similarity,
+                            'avg_similarity': avg_similarity,
+                            'valid_comparisons': valid_comparisons,
+                            'total_representatives': len(representatives)
+                        }
                 
-                self.logger.debug(f"{current_folder} vs {compare_folder}: "
-                               f"threshold={threshold:.3f}, max_sim={max_similarity:.3f}, "
-                               f"valid_comparisons={valid_comparisons}")
+                # Move face if similarity exceeds threshold
+                if best_match_folder and best_similarity >= consensus_threshold:
+                    self.logger.info(f"MATCH FOUND: {face_file.name} -> {best_match_folder} "
+                                f"(similarity: {best_similarity:.3f})")
+                    
+                    # Move the face to the best matching person folder
+                    destination_folder = output_dir / best_match_folder
+                    if not destination_folder.exists():
+                        self.logger.error(f"Destination folder does not exist: {destination_folder}")
+                        continue
+                    
+                    # Generate unique filename in destination
+                    dest_file = destination_folder / face_file.name
+                    counter = 1
+                    while dest_file.exists():
+                        stem = face_file.stem
+                        suffix = face_file.suffix
+                        dest_file = destination_folder / f"{stem}_unknown_{counter:03d}{suffix}"
+                        counter += 1
+                    
+                    try:
+                        # Move the file
+                        shutil.move(str(face_file), str(dest_file))
+                        moved_faces[str(face_file)] = best_match_folder
+                        total_moved_faces += 1
+                        
+                        self.logger.info(f"Moved {face_file.name} to {best_match_folder} as {dest_file.name}")
+                        self.logger.debug(f"Match details: {best_match_details}")
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error moving {face_file} to {dest_file}: {e}")
                 
-                if max_similarity >= threshold:
-                    self.logger.info(f"ADAPTIVE MERGE: {compare_folder} -> {current_folder} "
-                                   f"(threshold: {threshold:.3f}, similarity: {max_similarity:.3f})")
-                    merge_mapping[compare_folder] = current_folder
-                    merged_folders.add(compare_folder)
-                    self.stats['successful_merges'] += 1
-        
-        return merge_mapping
-    
-    def _calculate_optimal_eps(self, distances: np.ndarray) -> float:
-        """Calculate optimal eps parameter for DBSCAN based on distance distribution."""
-        # Use the distance to the k-th nearest neighbor approach
-        k = 4  # Common choice
-        k_distances = []
-        
-        for i in range(len(distances)):
-            row_distances = distances[i]
-            row_distances_sorted = np.sort(row_distances)
-            if len(row_distances_sorted) > k:
-                k_distances.append(row_distances_sorted[k])
-        
-        k_distances.sort()
-        
-        # Use knee point detection or percentile-based approach
-        eps = np.percentile(k_distances, 95)  # Use 95th percentile
-        
-        self.logger.info(f"Calculated optimal eps: {eps:.4f} (from {len(k_distances)} k-distances)")
-        return eps
-    
-    def _create_new_groupings(self, output_dir: Path, face_to_folder: Dict, 
-                            folder_faces: Dict, new_labels: np.ndarray):
-        """Create new folder groupings based on clustering results."""
-        self.logger.info("Creating new groupings based on clustering results")
-        
-        # Create mapping from new cluster labels to faces
-        cluster_faces = defaultdict(list)
-        for face_idx, cluster_label in enumerate(new_labels):
-            if cluster_label != -1:  # Ignore noise points
-                original_folder = face_to_folder[face_idx]
-                # Find the actual face file for this index
-                for folder_name, faces_list in folder_faces.items():
-                    if folder_name == original_folder:
-                        for face_file, file_idx in faces_list:
-                            if file_idx == face_idx:
-                                cluster_faces[cluster_label].append(face_file)
-                                break
-        
-        # Create new folders based on clusters
-        temp_dir = output_dir / "temp_reclustered"
-        temp_dir.mkdir(exist_ok=True)
-        
-        for cluster_id, faces in cluster_faces.items():
-            cluster_folder = temp_dir / f"person_{cluster_id:03d}"
-            cluster_folder.mkdir(exist_ok=True)
+                else:
+                    if best_match_folder:
+                        self.logger.debug(f"No match for {face_file.name}: best similarity {best_similarity:.3f} "
+                                        f"< threshold {consensus_threshold:.3f} (best folder: {best_match_folder})")
+                    else:
+                        self.logger.debug(f"No valid matches found for {face_file.name}")
             
-            self.logger.info(f"Creating cluster {cluster_id} with {len(faces)} faces")
-            
-            for face_file in faces:
-                dest_file = cluster_folder / face_file.name
-                counter = 1
-                while dest_file.exists():
-                    stem = face_file.stem
-                    suffix = face_file.suffix
-                    dest_file = cluster_folder / f"{stem}_{counter:03d}{suffix}"
-                    counter += 1
-                shutil.copy2(face_file, dest_file)
+            # Remove unknown folder if it's now empty
+            remaining_files = list(unknown_folder.glob("*"))
+            if not remaining_files:
+                try:
+                    unknown_folder.rmdir()
+                    self.logger.info(f"Removed empty unknown folder: {unknown_folder.name}")
+                except Exception as e:
+                    self.logger.error(f"Error removing empty folder {unknown_folder.name}: {e}")
+            else:
+                self.logger.info(f"Unknown folder {unknown_folder.name} still contains {len(remaining_files)} files")
         
-        # Replace original folders with new clusters
-        self.logger.info("Replacing original folders with new clusters")
+        # Summary statistics
+        self.logger.info("=" * 60)
+        self.logger.info("UNKNOWN FOLDER PROCESSING COMPLETED")
+        self.logger.info(f"Total unknown faces processed: {total_unknown_faces}")
+        self.logger.info(f"Total faces moved to person folders: {total_moved_faces}")
+        self.logger.info(f"Faces remaining in unknown folders: {total_unknown_faces - total_moved_faces}")
         
-        # Remove original person folders
-        for folder in output_dir.glob("person_*"):
-            if folder.is_dir() and folder != temp_dir:
-                shutil.rmtree(folder)
+        if total_unknown_faces > 0:
+            move_rate = (total_moved_faces / total_unknown_faces) * 100
+            self.logger.info(f"Move rate: {move_rate:.1f}%")
         
-        # Move new clusters to main directory
-        for cluster_folder in temp_dir.glob("person_*"):
-            dest_folder = output_dir / cluster_folder.name
-            shutil.move(str(cluster_folder), str(dest_folder))
+        # Log destination summary
+        destination_summary = {}
+        for source_file, dest_folder in moved_faces.items():
+            destination_summary[dest_folder] = destination_summary.get(dest_folder, 0) + 1
         
-        # Remove temp directory
-        temp_dir.rmdir()
+        if destination_summary:
+            self.logger.info("Destination folder summary:")
+            for folder, count in sorted(destination_summary.items()):
+                self.logger.info(f"  {folder}: {count} faces")
         
-        self.logger.info(f"Created {len(cluster_faces)} new person folders")
+        self.logger.info("=" * 60)
+        
+        return moved_faces
     
     def _extract_temporal_info(self, folder_path: Path) -> Dict:
         """Extract temporal information from face filenames."""
@@ -737,8 +546,7 @@ class ImprovedRegrouper:
         
         return temporal_data
     
-    def _find_merges_with_temporal_weighting(self, folder_temporal_info: Dict, 
-                                           output_dir: Path) -> Dict[str, str]:
+    def _find_merges_with_temporal_weighting(self, folder_temporal_info: Dict, output_dir: Path) -> Dict[str, str]:
         """Find merges considering temporal overlap."""
         self.logger.info("Finding merges with temporal weighting")
         
@@ -800,7 +608,65 @@ class ImprovedRegrouper:
         
         similarity = self.detect_manager.compute_similarity(str(rep1[0]), str(rep2[0]))
         return similarity if similarity is not None else 0.0
-    
+
+    def move_folder_contents_recursively(self, source_path: Path, target_path: Path):
+        """
+        Recursively move contents from source to target, maintaining folder structure.
+        """
+        moved_files = 0
+        
+        def move_recursive(src_dir: Path, tgt_dir: Path, depth: int = 0):
+            nonlocal moved_files
+            indent = "  " * depth
+            
+            # Ensure target directory exists
+            if not tgt_dir.exists():
+                try:
+                    tgt_dir.mkdir(parents=True)
+                    self.logger.info(f"{indent}Created directory: {tgt_dir}")
+                except Exception as e:
+                    self.logger.error(f"{indent}Error creating directory {tgt_dir}: {e}")
+                    return
+            
+            # Move all items in current directory
+            for item in src_dir.iterdir():
+                if item.is_file():
+                    # Handle file
+                    target_file = tgt_dir / item.name
+                    counter = 1
+                    while target_file.exists():
+                        stem = item.stem
+                        suffix = item.suffix
+                        target_file = tgt_dir / f"{stem}_{counter:03d}{suffix}"
+                        counter += 1
+                    
+                    try:
+                        shutil.move(str(item), str(target_file))
+                        moved_files += 1
+                        self.logger.debug(f"{indent}Moved file: {item.name} -> {target_file}")
+                    except Exception as e:
+                        self.logger.error(f"{indent}Error moving {item} to {target_file}: {e}")
+                
+                elif item.is_dir():
+                    # Handle subdirectory recursively
+                    target_subdir = tgt_dir / item.name
+                    self.logger.info(f"{indent}Processing subdirectory: {item.name}")
+                    move_recursive(item, target_subdir, depth + 1)
+                    
+                    # Remove empty source subdirectory
+                    try:
+                        if not any(item.iterdir()):
+                            item.rmdir()
+                            self.logger.info(f"{indent}Removed empty directory: {item}")
+                        else:
+                            self.logger.warning(f"{indent}Directory not empty after move: {item}")
+                    except Exception as e:
+                        self.logger.error(f"{indent}Error removing directory {item}: {e}")
+        
+        # Start recursive move
+        move_recursive(source_path, target_path)
+        return moved_files
+
     def _execute_merges(self, output_dir: Path, merge_mapping: Dict[str, str]):
         """Execute folder merges."""
         if not merge_mapping:
@@ -822,32 +688,13 @@ class ImprovedRegrouper:
                 continue
             
             self.logger.info(f"Merging {source_folder} -> {target_folder}")
-            
-            # Count files before merge
-            source_files = list(source_path.glob("*.jpg"))
             target_files_before = len(list(target_path.glob("*.jpg")))
-            
-            # Move all files
-            moved_files = 0
-            for item in source_files:
-                if item.is_file():
-                    target_file = target_path / item.name
-                    counter = 1
-                    while target_file.exists():
-                        stem = item.stem
-                        suffix = item.suffix
-                        target_file = target_path / f"{stem}_{counter:03d}{suffix}"
-                        counter += 1
-                    
-                    try:
-                        shutil.move(str(item), str(target_file))
-                        moved_files += 1
-                    except Exception as e:
-                        self.logger.error(f"Error moving {item} to {target_file}: {e}")
-            
+            moved_files = self.move_folder_contents_recursively(source_path, target_path)
+
             # Remove empty source folder
             try:
-                remaining_files = list(source_path.iterdir())
+                # remaining_files = list(source_path.iterdir())
+                remaining_files = [f for f in source_path.iterdir() if f.is_file() and f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
                 if not remaining_files:
                     source_path.rmdir()
                     self.logger.info(f"Removed empty folder: {source_folder}")
@@ -897,14 +744,13 @@ class ImprovedRegrouper:
         final_folders = sorted([f for f in output_dir.iterdir() 
                               if f.is_dir() and f.name.startswith("person_")])
         self.logger.info(f"Renumbering complete: {len(final_folders)} folders")
-    
+
     def get_statistics(self) -> Dict:
         """Get processing statistics."""
         return self.stats.copy()
 
 
-def enhanced_regroup_person_folders(output_dir, detect_manager, method="multiple_representatives", 
-                                   log_file=None, **kwargs):
+def enhanced_regroup_person_folders(output_dir, detect_manager, method="multiple_representatives", log_file=None, **kwargs):
     """
     Enhanced regrouping with multiple strategies and comprehensive logging.
     
@@ -921,7 +767,7 @@ def enhanced_regroup_person_folders(output_dir, detect_manager, method="multiple
         log_file_path = Path(log_file)
         log_file_path.parent.mkdir(parents=True, exist_ok=True)
     
-    regrouper = ImprovedRegrouper(detect_manager, similarity_threshold=0.75, log_file=log_file_path)
+    regrouper = ImprovedRegrouper(detect_manager, similarity_threshold=THRESHOLD, log_file=log_file_path)
     output_path = Path(output_dir)
     
     if not output_path.exists():
@@ -935,19 +781,13 @@ def enhanced_regroup_person_folders(output_dir, detect_manager, method="multiple
     
     try:
         if method == "multiple_representatives":
-            num_representatives = kwargs.get('num_representatives', 3)
-            consensus_threshold = kwargs.get('consensus_threshold', 0.6)
+            num_representatives = kwargs.get('num_representatives', 1)
+            consensus_threshold = kwargs.get('consensus_threshold', THRESHOLD)
             regrouper.regroup_with_multiple_representatives(
                 output_path, 
                 num_representatives=num_representatives, 
                 consensus_threshold=consensus_threshold
             )
-        elif method == "quality_based":
-            regrouper.regroup_with_quality_scoring(output_path)
-        elif method == "adaptive_threshold":
-            regrouper.regroup_with_adaptive_threshold(output_path)
-        elif method == "embedding_clustering":
-            regrouper.regroup_with_embedding_clustering(output_path)
         elif method == "temporal_context":
             regrouper.regroup_with_temporal_context(output_path)
         else:
@@ -995,23 +835,15 @@ if __name__ == "__main__":
         method="multiple_representatives",
         log_file=f"{log_directory}/regrouping_multiple_reps.log",
         num_representatives=1,
-        consensus_threshold=0.9
+        consensus_threshold=THRESHOLD
     )
     
     # Method 2: Quality-based regrouping
-    # stats2 = enhanced_regroup_person_folders(
-    #     output_directory,
-    #     detect_manager=None,  # Replace with your FaceDINOManager()
-    #     method="quality_based",
-    #     log_file=f"{log_directory}/regrouping_quality.log"
-    # )
-    
-    # Method 3: Adaptive threshold
-    # stats3 = enhanced_regroup_person_folders(
-    #     output_directory,
-    #     detect_manager=None,  # Replace with your FaceDINOManager()
-    #     method="adaptive_threshold",
-    #     log_file=f"{log_directory}/regrouping_adaptive.log"
-    # )
+    stats2 = enhanced_regroup_person_folders(
+        output_directory,
+        detect_manager=None,  # Replace with your FaceDINOManager()
+        method="temporal_context",
+        log_file=f"{log_directory}/regrouping_quality.log"
+    )
     
     print("Regrouping completed. Check log files for detailed information.")

@@ -21,7 +21,7 @@ class YOLOPersonManager(DetectManager):
         self.model = YOLO(self.model_path)
         print("YOLO model loaded.")
 
-    def _detect_frame(self, frame):
+    def _detect_frame(self, frame, file_path=None):
         """
         Detect people in a frame using YOLO.
         Returns list of dicts: {'bbox': (top, right, bottom, left), 'normed_embedding': array}

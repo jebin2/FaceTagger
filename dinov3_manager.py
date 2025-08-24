@@ -52,7 +52,7 @@ class FaceDINOManager(DetectManager):
         from ultralytics import YOLO
         """Load YOLO model for person detection."""
         if not hasattr(self, "yolo_model") or self.yolo_model is None:
-            self.yolo_model = YOLO("yolo12m.pt")  # change path if needed
+            self.yolo_model = YOLO("yolov12l-face.pt")  # change path if needed
 
     def get_person_bboxes(self, frame):
         """
@@ -69,9 +69,9 @@ class FaceDINOManager(DetectManager):
 
         for result in results:
             for box in result.boxes:
-                cls = int(box.cls[0])
-                if cls != 0:  # class 0 = person in COCO
-                    continue
+                # cls = int(box.cls[0])
+                # if cls != 0:  # class 0 = person in COCO
+                #     continue
 
                 # Convert xyxy -> (top, right, bottom, left)
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
@@ -120,7 +120,7 @@ class FaceDINOManager(DetectManager):
 
         return top, right, bottom, left
 
-    def _detect_frame(self, frame):
+    def _detect_frame(self, frame, file_path=None):
         """
         Detect faces and extract embeddings with DINOv3.
         """

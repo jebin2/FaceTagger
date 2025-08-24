@@ -10,7 +10,8 @@ class FaceRecognitionManager(DetectManager):
     """
     DetectManager implementation.
     Supports real faces (face_recognition) and anime faces (YOLO).
-    Returns list of dicts: {'bbox': (top, right, bottom, left), 'embedding': array or None}
+    Always returns list of dicts:
+    [ {'bbox': (left, top, right, bottom), 'embedding': array or None}, ... ]
     """
 
     def __init__(self, model_name='cnn', is_anime=False, anime_model_path="yolov8x6_animeface.pt"):
@@ -37,32 +38,32 @@ class FaceRecognitionManager(DetectManager):
         self.loaded = True
         print("Model loaded in %.2fs" % (time.time() - start))
 
-    def _detect_frame(self, frame):
+    def _detect_frame(self, frame, file_path=None):
         """
         Detect faces in a frame and return list of dicts:
-        [ {'bbox': (top, right, bottom, left), 'embedding': array or None}, ... ]
+        [ {'bbox': (left, top, right, bottom), 'embedding': array or None}, ... ]
         """
+        faces = []
+
         if self.is_anime:
-            # Use YOLO anime face detector
+            # YOLO returns (x1, y1, x2, y2) -> (left, top, right, bottom)
             results = self.model(frame, verbose=False)
-            faces = []
             for result in results:
                 for box in result.boxes.xyxy.cpu().numpy():
                     x1, y1, x2, y2 = map(int, box[:4])
-                    # Convert to (top, right, bottom, left) for consistency
-                    bbox = (y1, x2, y2, x1)
+                    bbox = (x1, y1, x2, y2)
                     faces.append({'bbox': bbox, 'embedding': None})
-            return faces
         else:
-            # Use real face recognition
+            # face_recognition returns (top, right, bottom, left)
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             face_locations = face_recognition.face_locations(rgb_frame, model=self.model_name)
             face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
 
-            faces = []
-            for loc, enc in zip(face_locations, face_encodings):
-                faces.append({'bbox': loc, 'embedding': enc.tolist()})
-            return faces
+            for (top, right, bottom, left), enc in zip(face_locations, face_encodings):
+                bbox = (left, top, right, bottom)  # convert to (l, t, r, b)
+                faces.append({'bbox': bbox, 'embedding': enc.tolist()})
+
+        return faces
 
     def _cleanup_model(self):
         print("FaceRecognitionManager cleanup done.")

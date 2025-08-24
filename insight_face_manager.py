@@ -18,7 +18,7 @@ class InsightFaceManager(DetectManager):
 		self.app.prepare(ctx_id=0, det_size=(640, 640))
 		print("InsightFace models loaded.")
 
-	def _detect_frame(self, frame):
+	def _detect_frame(self, frame, file_path=None):
 		"""
 		Detect faces and return list of dicts with bounding boxes and embeddings.
 		"""

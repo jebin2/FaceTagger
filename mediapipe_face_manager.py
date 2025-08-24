@@ -25,7 +25,7 @@ class MediaPipeFaceManager(DetectManager):
 		)
 		print("MediaPipeFaceManager model loaded.")
 
-	def _detect_frame(self, frame):
+	def _detect_frame(self, frame, file_path=None):
 		"""
 		Detect faces in a frame.
 		Returns list of dicts: {'bbox': (top, right, bottom, left), 'normed_embedding': array}

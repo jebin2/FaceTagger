@@ -23,7 +23,7 @@ class DeepFaceManager(DetectManager):
     def _load_model(self):
         print(f"DeepFaceManager ready. Using {self.model_name} with {self.detector_backend}")
 
-    def _detect_frame(self, img_path):
+    def _detect_frame(self, frame, file_path=None):
         """
         Detect all faces in an image and return list of dicts with bbox + embedding.
         Returns [] if no face detected.

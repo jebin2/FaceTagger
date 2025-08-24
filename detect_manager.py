@@ -19,14 +19,14 @@ class DetectManager(ABC):
 		"""Subclass should implement actual model loading."""
 		pass
 
-	def detect(self, frame):
+	def detect(self, frame, file_path=None):
 		"""Detect faces, automatically loading model if needed."""
 		if not self._loaded:
 			self.load()
-		return self._detect_frame(frame)
+		return self._detect_frame(frame, file_path)
 
 	@abstractmethod
-	def _detect_frame(self, frame):
+	def _detect_frame(self, frame, file_path=None):
 		"""Subclass should implement actual frame detection."""
 		pass
 
