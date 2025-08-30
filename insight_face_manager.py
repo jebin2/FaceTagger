@@ -95,7 +95,7 @@ if __name__ == "__main__":
 		if "already_processed_face" not in obj:
 			obj["already_processed_face"] = False
 
-		if not obj["already_processed_face"] or obj["already_processed_face"]:
+		if not obj["already_processed_face"]:
 			results = detect_manager._detect_frame(frame)  # assuming this returns list of dicts with 'bbox'
 			obj["already_processed_face"] = True
 
