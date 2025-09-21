@@ -100,6 +100,7 @@ if __name__ == "__main__":
 			obj["already_processed_face"] = True
 
 			if results:
+				obj["all_face"] = [face['bbox'] for face in results]
 				# Find the largest face by area
 				largest_face = max(
 					results, 
