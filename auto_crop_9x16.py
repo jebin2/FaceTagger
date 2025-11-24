@@ -454,8 +454,17 @@ class SmartCropPipeline:
         print("=" * 60)
 
 
-def main(VIDEO_PATH):
+def main():
     """Main entry point"""
+    import sys
+
+    if len(sys.argv) < 3:
+        print("Usage: python auto_crop_9x16.py <video_path> <anime|real>")
+        sys.exit(1)
+
+    VIDEO_PATH = sys.argv[1]
+    mode = sys.argv[2].lower()
+    is_anime = (mode == "anime")
     CROP_JSON = "crop_data.json"
     OUTPUT_VIDEO = "output_from_auto_crop_9x16.mp4"
     
@@ -479,5 +488,5 @@ def main(VIDEO_PATH):
 
 
 if __name__ == "__main__":
-    VIDEO_PATH = "example_auto_crop_9x16.mp4"
-    main(VIDEO_PATH)
+    # VIDEO_PATH = "example_auto_crop_9x16.mp4"
+    main()
