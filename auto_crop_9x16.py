@@ -457,7 +457,7 @@ class SmartCropPipeline:
 def main(VIDEO_PATH):
     """Main entry point"""
     CROP_JSON = "crop_data.json"
-    OUTPUT_VIDEO = "output_vertical.mp4"
+    OUTPUT_VIDEO = "output_from_auto_crop_9x16.mp4"
     
     config = CropConfig(
         target_width=1080,
@@ -479,5 +479,5 @@ def main(VIDEO_PATH):
 
 
 if __name__ == "__main__":
-    VIDEO_PATH = "/home/jebin/git/CaptionCreator/tempOutput/gywuRYSyDn_captioned_movie_shorts.mp4"
+    VIDEO_PATH = "example_auto_crop_9x16.mp4"
     main(VIDEO_PATH)
