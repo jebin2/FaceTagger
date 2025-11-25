@@ -192,12 +192,12 @@ class SmoothingFilter:
 class SmartCropProcessor:
     """Main processor for smart video cropping analysis"""
     
-    def __init__(self, video_path: str, output_json: str, config: CropConfig = None):
+    def __init__(self, video_path: str, output_json: str, config: CropConfig = None, face_model_path=None):
         self.video_path = video_path
         self.output_json = output_json
         self.config = config or CropConfig()
         
-        self.models = DetectionModels()
+        self.models = DetectionModels(face_model_path=face_model_path)
         self.scene_detector = SceneDetector(self.config.scene_change_threshold)
         self.position_calc = CropPositionCalculator(self.config, self.models)
         self.smoother = SmoothingFilter(self.config)
@@ -417,18 +417,19 @@ class SmartCropPipeline:
     """Complete pipeline for analyzing and rendering smart-cropped videos"""
     
     def __init__(self, video_path: str, crop_json: str = "crop_data.json", 
-                 output_video: str = "output_vertical.mp4", config: CropConfig = None):
+                 output_video: str = "output_vertical.mp4", config: CropConfig = None, face_model_path=None):
         self.video_path = video_path
         self.crop_json = crop_json
         self.output_video = output_video
         self.config = config or CropConfig()
+        self.face_model_path=face_model_path
     
     def run_analysis(self):
         """Run crop position analysis"""
         print("=" * 60)
         print("STEP 1: Analyzing video for optimal crop positions")
         print("=" * 60)
-        processor = SmartCropProcessor(self.video_path, self.crop_json, self.config)
+        processor = SmartCropProcessor(self.video_path, self.crop_json, self.config, face_model_path=self.face_model_path)
         processor.run()
     
     def run_rendering(self):
@@ -467,6 +468,7 @@ def main():
     is_anime = (mode == "anime")
     CROP_JSON = "crop_data.json"
     OUTPUT_VIDEO = "output_from_auto_crop_9x16.mp4"
+    face_model_path = "yolov8x6_animeface.pt" if is_anime else "yolov12l-face.pt"
     
     config = CropConfig(
         target_width=1080,
@@ -479,7 +481,7 @@ def main():
     )
     
     # Run complete pipeline
-    pipeline = SmartCropPipeline(VIDEO_PATH, CROP_JSON, OUTPUT_VIDEO, config)
+    pipeline = SmartCropPipeline(VIDEO_PATH, CROP_JSON, OUTPUT_VIDEO, config, face_model_path=face_model_path)
     pipeline.run_full_pipeline()
     
     # Or run steps individually:

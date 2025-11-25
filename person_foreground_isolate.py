@@ -21,6 +21,13 @@ class BackgroundConfig:
     enable_pipe_output: bool = True
     blur_kernel_size: Tuple[int, int] = (55, 55)
     mask_threshold: float = 0.3
+    bg_color: Tuple[int, int, int] = (255, 255, 255)   # default white
+    use_bg_color: bool = False
+    debug_show_boxes: bool = False  # Debug option to show bounding boxes
+    use_oval_mask: bool = False  # Use oval mask ALWAYS (ignores person detection)
+    oval_fallback: bool = False  # NEW: Use oval mask as fallback when no person detected
+    oval_width_ratio: float = 1  # Oval width as ratio of frame width (0.0-1.0)
+    oval_height_ratio: float = 1  # Oval height as ratio of frame height (0.0-1.0)
 
 
 @dataclass
@@ -38,10 +45,10 @@ class PersonSegmentationModel:
         print(f"Loading YOLO-Seg: {model_path}")
         self.model = YOLO(model_path)
     
-    def segment_persons(self, frame: np.ndarray) -> Tuple[np.ndarray, List[float]]:
+    def segment_persons(self, frame: np.ndarray) -> Tuple[List[np.ndarray], List[float], List[Tuple[int, int, int, int]]]:
         """
         Detect and segment persons in frame
-        Returns: (union_mask, list_of_centers)
+        Returns: (person_masks, list_of_centers, list_of_boxes)
         """
         results = self.model(frame, device="cpu", verbose=False)[0]
         
@@ -50,6 +57,7 @@ class PersonSegmentationModel:
         
         person_masks = []
         centers = []
+        person_boxes = []  # NEW: Store bounding boxes
         
         if boxes is not None:
             classes = boxes.cls.cpu().numpy()
@@ -62,8 +70,9 @@ class PersonSegmentationModel:
                     
                     x1, y1, x2, y2 = xyxy[i]
                     centers.append((x1 + x2) / 2)
+                    person_boxes.append((int(x1), int(y1), int(x2), int(y2)))  # NEW
         
-        return person_masks, centers
+        return person_masks, centers, person_boxes
     
     def create_union_mask(self, person_masks: List[np.ndarray], 
                          frame_width: int, frame_height: int,
@@ -80,6 +89,28 @@ class PersonSegmentationModel:
             final_mask = np.maximum(final_mask, binary_mask)
         
         return final_mask
+    
+    def create_oval_mask(self, frame_width: int, frame_height: int,
+                        width_ratio: float = 0.4, height_ratio: float = 0.8) -> np.ndarray:
+        """Create vertical oval mask in center of frame"""
+        mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
+        
+        # Calculate oval dimensions
+        center_x = frame_width // 2
+        center_y = frame_height // 2
+        oval_width = int(frame_width * width_ratio)  # radius (half of width)
+        oval_height = int(frame_height * height_ratio)  # radius (half of height)
+        
+        # Draw filled ellipse
+        cv2.ellipse(mask, 
+                   (center_x, center_y),  # center
+                   (oval_width, oval_height),  # axes (horizontal, vertical)
+                   0,  # angle
+                   0, 360,  # start and end angle
+                   255,  # color (white)
+                   -1)  # filled
+        
+        return mask
 
 
 class TrackingSmoothing:
@@ -129,18 +160,26 @@ class BackgroundProcessor:
             self.custom_bg = cv2.imread(config.bg_image_path)
             print(f"Loaded custom background: {config.bg_image_path}")
     
-    def create_background(self, frame: np.ndarray, 
-                         width: int, height: int) -> np.ndarray:
-        """Create background layer (blurred or custom image)"""
+    def create_background(self, frame: np.ndarray, width: int, height: int) -> np.ndarray:
+        """Create background layer (blurred, custom image, or solid color)"""
+
+        # --- NEW: solid color background ---
+        if self.config.use_bg_color:
+            bg = np.full((height, width, 3), self.config.bg_color, dtype=np.uint8)
+            return bg
+
+        # Custom background image
         if self.custom_bg is not None:
             bg = cv2.resize(self.custom_bg, (width, height))
         else:
             bg = frame.copy()
-        
+
+        # Blur if enabled
         if self.config.enable_background_blur:
             bg = cv2.GaussianBlur(bg, self.config.blur_kernel_size, 0)
-        
+
         return bg
+
     
     def composite_frame(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Composite foreground and background using mask"""
@@ -159,6 +198,33 @@ class BackgroundProcessor:
         final_frame = cv2.add(bg_part, fg)
         
         return final_frame
+    
+    def draw_debug_boxes(self, frame: np.ndarray, boxes: List[Tuple[int, int, int, int]], 
+                         centers: List[float]) -> np.ndarray:
+        """Draw bounding boxes and center points for debugging"""
+        debug_frame = frame.copy()
+        
+        for i, (x1, y1, x2, y2) in enumerate(boxes):
+            # Draw bounding box
+            cv2.rectangle(debug_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+            # Draw center point
+            if i < len(centers):
+                center_x = int(centers[i])
+                center_y = (y1 + y2) // 2
+                cv2.circle(debug_frame, (center_x, center_y), 5, (0, 0, 255), -1)
+            
+            # Add label
+            label = f"Person {i+1}"
+            cv2.putText(debug_frame, label, (x1, y1 - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # Add person count
+        count_text = f"Persons detected: {len(boxes)}"
+        cv2.putText(debug_frame, count_text, (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        return debug_frame
 
 
 class VideoOutputWriter:
@@ -268,29 +334,59 @@ class PersonSegmentationProcessor:
         Process single frame with segmentation and background effects
         Returns: (processed_frame, center_x)
         """
-        # Segment persons
-        person_masks, centers = self.model.segment_persons(frame)
-        
-        # Create union mask
-        mask = self.model.create_union_mask(
-            person_masks,
-            self.width,
-            self.height,
-            self.bg_config.mask_threshold
-        )
-        
-        # Calculate center position
-        if len(centers) > 0:
-            center_x = float(np.mean(centers))
+        # Check if using oval mask ALWAYS (force mode)
+        if self.bg_config.use_oval_mask:
+            # Use fixed oval mask instead of person detection
+            mask = self.model.create_oval_mask(
+                self.width,
+                self.height,
+                self.bg_config.oval_width_ratio,
+                self.bg_config.oval_height_ratio
+            )
+            boxes = []
+            centers = []
+            center_x = self.width // 2  # Center position
         else:
-            # No person detected - use previous or default
-            center_x = self.smoother.prev_center_x if self.smoother.prev_center_x else self.width // 2
-        
-        # Apply smoothing
-        center_x = self.smoother.smooth_position(center_x, self.width // 2)
+            # Segment persons (normal person detection)
+            person_masks, centers, boxes = self.model.segment_persons(frame)
+            
+            # Check if person detected
+            if len(person_masks) > 0:
+                # Person detected - use person segmentation mask
+                mask = self.model.create_union_mask(
+                    person_masks,
+                    self.width,
+                    self.height,
+                    self.bg_config.mask_threshold
+                )
+            elif self.bg_config.oval_fallback:
+                # No person detected but oval fallback enabled - use oval mask
+                mask = self.model.create_oval_mask(
+                    self.width,
+                    self.height,
+                    self.bg_config.oval_width_ratio,
+                    self.bg_config.oval_height_ratio
+                )
+            else:
+                # No person detected and no fallback - empty mask (fully blurred)
+                mask = np.zeros((self.height, self.width), dtype=np.uint8)
+            
+            # Calculate center position
+            if len(centers) > 0:
+                center_x = float(np.mean(centers))
+            else:
+                # No person detected - use previous or default
+                center_x = self.smoother.prev_center_x if self.smoother.prev_center_x else self.width // 2
+            
+            # Apply smoothing
+            center_x = self.smoother.smooth_position(center_x, self.width // 2)
         
         # Composite frame with background effects
         final_frame = self.bg_processor.composite_frame(frame, mask)
+        
+        # Draw debug boxes if enabled (only in person detection mode)
+        if self.bg_config.debug_show_boxes and not self.bg_config.use_oval_mask and len(boxes) > 0:
+            final_frame = self.bg_processor.draw_debug_boxes(final_frame, boxes, centers)
         
         return final_frame, center_x
     
@@ -336,11 +432,16 @@ def main():
     
     # Configure background effects
     bg_config = BackgroundConfig(
-        enable_background_blur=True,
+        enable_background_blur=True,  # Enable blur
         bg_image_path=None,  # Set to image path for custom background
         enable_pipe_output=True,
         blur_kernel_size=(55, 55),
-        mask_threshold=0.3
+        mask_threshold=0.3,
+        debug_show_boxes=True,  # Show boxes when person detected
+        use_oval_mask=False,  # Don't force oval (use person detection)
+        oval_fallback=True,  # NEW: Use oval as fallback when no person detected
+        oval_width_ratio=0.4,  # 40% of frame width
+        oval_height_ratio=0.8  # 80% of frame height
     )
     
     # Configure smoothing
