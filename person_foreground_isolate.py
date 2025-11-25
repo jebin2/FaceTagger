@@ -437,11 +437,11 @@ def main():
         enable_pipe_output=True,
         blur_kernel_size=(55, 55),
         mask_threshold=0.3,
-        debug_show_boxes=True,  # Show boxes when person detected
+        debug_show_boxes=False,  # Show boxes when person detected
         use_oval_mask=False,  # Don't force oval (use person detection)
         oval_fallback=True,  # NEW: Use oval as fallback when no person detected
-        oval_width_ratio=0.4,  # 40% of frame width
-        oval_height_ratio=0.8  # 80% of frame height
+        oval_width_ratio=1,  # 40% of frame width
+        oval_height_ratio=1  # 80% of frame height
     )
     
     # Configure smoothing
