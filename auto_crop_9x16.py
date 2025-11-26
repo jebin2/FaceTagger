@@ -2,7 +2,7 @@
 Smart Video Crop System
 Automatically crops horizontal videos to 9:16 vertical format by intelligently 
 tracking faces, persons, objects, and motion. Then applies the crop to generate
-the final vertical video.
+the final vertical video with blurred background for aspect ratio preservation.
 """
 
 import cv2
@@ -28,6 +28,13 @@ class CropConfig:
     
     # Scene detection
     scene_change_threshold: int = 28
+    
+    # Aspect ratio stretch threshold (1.0 = no stretch, 1.2 = allow 20% stretch)
+    max_stretch_ratio: float = 1.2
+    
+    # Blur parameters for background
+    blur_kernel_size: int = 51  # Must be odd number
+    blur_sigma: int = 30
     
     # Objects to track (COCO class IDs)
     object_classes: List[int] = None
@@ -328,15 +335,14 @@ class SmartCropProcessor:
 
 
 class VideoRenderer:
-    """Applies crop positions to video and renders final output"""
+    """Applies crop positions to video and renders final output with blur background"""
     
     def __init__(self, video_path: str, crop_json: str, output_path: str, 
-                 target_width: int = 1080, target_height: int = 1920):
+                 config: CropConfig = None):
         self.video_path = video_path
         self.crop_json = crop_json
         self.output_path = output_path
-        self.target_width = target_width
-        self.target_height = target_height
+        self.config = config or CropConfig()
         
         self.crop_positions = []
         self.fps = 0
@@ -351,6 +357,119 @@ class VideoRenderer:
         self.crop_positions = data["crop_left"]
         print(f"Loaded {len(self.crop_positions)} crop positions from {self.crop_json}")
     
+    def create_blurred_background(self, frame: np.ndarray) -> np.ndarray:
+        """Create heavily blurred version of frame for background"""
+        blurred = cv2.GaussianBlur(
+            frame, 
+            (self.config.blur_kernel_size, self.config.blur_kernel_size), 
+            self.config.blur_sigma
+        )
+        return blurred
+    
+    def calculate_resize_dimensions(self, crop_width: int, crop_height: int) -> Tuple[int, int, bool]:
+        """
+        Calculate optimal resize dimensions:
+        1. Resize to match one dimension (keeping aspect ratio)
+        2. If other dimension is short, stretch up to max_stretch_ratio (max 1.2x)
+        3. Fill remaining gap with blur
+        
+        Returns: (new_width, new_height, needs_blur_background)
+        """
+        target_w = self.config.target_width
+        target_h = self.config.target_height
+        
+        # Calculate scale factors to match each dimension
+        scale_to_width = target_w / crop_width
+        scale_to_height = target_h / crop_height
+        
+        # Use the smaller scale to ensure content fits within target
+        base_scale = min(scale_to_width, scale_to_height)
+        
+        # Step 1: Resize maintaining aspect ratio until one dimension matches
+        fitted_w = int(crop_width * base_scale)
+        fitted_h = int(crop_height * base_scale)
+        
+        # Step 2: Check which dimension matches and stretch the other if needed
+        if base_scale == scale_to_width:
+            # Width matches target, height might be short
+            # fitted_w should be target_w (or very close due to rounding)
+            fitted_w = target_w  # Ensure exact match
+            
+            if fitted_h >= target_h:
+                # Already fills or exceeds target height
+                return target_w, target_h, False
+            
+            # Height is short - stretch up to max_stretch_ratio
+            max_stretched_h = int(fitted_h * self.config.max_stretch_ratio)
+            final_h = min(max_stretched_h, target_h)
+            
+            if final_h >= target_h:
+                # Stretch reaches target - no blur needed
+                return target_w, target_h, False
+            else:
+                # Still short after max stretch - need blur
+                return target_w, final_h, True
+                
+        else:  # base_scale == scale_to_height
+            # Height matches target, width might be short
+            # fitted_h should be target_h (or very close due to rounding)
+            fitted_h = target_h  # Ensure exact match
+            
+            if fitted_w >= target_w:
+                # Already fills or exceeds target width
+                return target_w, target_h, False
+            
+            # Width is short - stretch up to max_stretch_ratio
+            max_stretched_w = int(fitted_w * self.config.max_stretch_ratio)
+            final_w = min(max_stretched_w, target_w)
+            
+            if final_w >= target_w:
+                # Stretch reaches target - no blur needed
+                return target_w, target_h, False
+            else:
+                # Still short after max stretch - need blur
+                return final_w, target_h, True
+    
+    def render_frame_with_blur(self, cropped: np.ndarray) -> np.ndarray:
+        """Render frame with blurred background if needed"""
+        crop_h, crop_w = cropped.shape[:2]
+        
+        # Calculate resize dimensions
+        new_w, new_h, needs_blur = self.calculate_resize_dimensions(crop_w, crop_h)
+        
+        if not needs_blur:
+            # Simple resize - stretch is within threshold
+            return cv2.resize(
+                cropped,
+                (self.config.target_width, self.config.target_height),
+                interpolation=cv2.INTER_AREA
+            )
+        
+        # Create blur background
+        blurred_bg = self.create_blurred_background(cropped)
+        blurred_bg = cv2.resize(
+            blurred_bg,
+            (self.config.target_width, self.config.target_height),
+            interpolation=cv2.INTER_LINEAR
+        )
+        
+        # Resize main content maintaining aspect ratio
+        resized_content = cv2.resize(
+            cropped,
+            (new_w, new_h),
+            interpolation=cv2.INTER_AREA
+        )
+        
+        # Calculate position to center the content
+        y_offset = (self.config.target_height - new_h) // 2
+        x_offset = (self.config.target_width - new_w) // 2
+        
+        # Composite content over blurred background
+        result = blurred_bg.copy()
+        result[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized_content
+        
+        return result
+    
     def render_video(self):
         """Apply crops and render final vertical video"""
         cap = cv2.VideoCapture(self.video_path)
@@ -360,7 +479,8 @@ class VideoRenderer:
         self.orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
         print(f"Rendering {frame_count} frames at {self.fps} fps...")
-        print(f"Output size: {self.target_width}x{self.target_height}")
+        print(f"Output size: {self.config.target_width}x{self.config.target_height}")
+        print(f"Max stretch ratio: {self.config.max_stretch_ratio}x")
         
         # Initialize video writer
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -368,7 +488,7 @@ class VideoRenderer:
             self.output_path, 
             fourcc, 
             self.fps, 
-            (self.target_width, self.target_height)
+            (self.config.target_width, self.config.target_height)
         )
         
         frame_id = 0
@@ -380,23 +500,19 @@ class VideoRenderer:
             
             # Get crop position for this frame
             left = self.crop_positions[frame_id]
-            right = left + self.target_width
+            right = left + self.config.target_width
             
             # Ensure valid bounds
-            left = max(0, min(left, self.orig_w - self.target_width))
-            right = left + self.target_width
+            left = max(0, min(left, self.orig_w - self.config.target_width))
+            right = left + self.config.target_width
             
             # Crop horizontally
             cropped = frame[:, left:right]
             
-            # Resize to target dimensions
-            resized = cv2.resize(
-                cropped, 
-                (self.target_width, self.target_height), 
-                interpolation=cv2.INTER_AREA
-            )
+            # Render with blur background if needed
+            final_frame = self.render_frame_with_blur(cropped)
             
-            out.write(resized)
+            out.write(final_frame)
             frame_id += 1
             
             if (frame_id) % 100 == 0:
@@ -422,7 +538,7 @@ class SmartCropPipeline:
         self.crop_json = crop_json
         self.output_video = output_video
         self.config = config or CropConfig()
-        self.face_model_path=face_model_path
+        self.face_model_path = face_model_path
     
     def run_analysis(self):
         """Run crop position analysis"""
@@ -441,8 +557,7 @@ class SmartCropPipeline:
             self.video_path, 
             self.crop_json, 
             self.output_video,
-            self.config.target_width,
-            self.config.target_height
+            self.config
         )
         renderer.run()
     
@@ -477,7 +592,10 @@ def main():
         deadzone=20,
         max_jump=35,
         disappear_tolerance=15,
-        scene_change_threshold=28
+        scene_change_threshold=28,
+        max_stretch_ratio=2,  # Allow up to 20% stretch
+        blur_kernel_size=51,
+        blur_sigma=30
     )
     
     # Run complete pipeline
