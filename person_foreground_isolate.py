@@ -16,7 +16,7 @@ from custom_logger import logger_config
 @dataclass
 class BackgroundConfig:
     """Configuration for background processing"""
-    enable_background_blur: bool = True
+    enable_background_blur: bool = False
     bg_image_path: Optional[str] = None
     enable_pipe_output: bool = True
     blur_kernel_size: Tuple[int, int] = (55, 55)
@@ -432,7 +432,7 @@ def main():
     
     # Configure background effects
     bg_config = BackgroundConfig(
-        enable_background_blur=True,  # Enable blur
+        enable_background_blur=False,  # Enable blur
         bg_image_path=None,  # Set to image path for custom background
         enable_pipe_output=True,
         blur_kernel_size=(55, 55),
