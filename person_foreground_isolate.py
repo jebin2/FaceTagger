@@ -41,7 +41,7 @@ class SmoothingConfig:
 class PersonSegmentationModel:
     """Manages YOLO segmentation model for person detection"""
     
-    def __init__(self, model_path: str = "yolov8s-seg.pt"):
+    def __init__(self, model_path: str = "models/yolov8s-seg.pt"):
         print(f"Loading YOLO-Seg: {model_path}")
         self.model = YOLO(model_path)
     
@@ -288,7 +288,7 @@ class PersonSegmentationProcessor:
     """Main processor for person segmentation and background effects"""
     
     def __init__(self, input_video: str, output_video: str,
-                 model_path: str = "yolov8s-seg.pt",
+                 model_path: str = "models/yolov8s-seg.pt",
                  bg_config: BackgroundConfig = None,
                  smooth_config: SmoothingConfig = None):
         self.input_video = input_video
@@ -428,7 +428,7 @@ def main():
     """Main entry point"""
     INPUT_VIDEO = "output_from_auto_crop_9x16.mp4"
     OUTPUT_VIDEO = "final_simple_edit.mp4"
-    MODEL_PATH = "yolo11l-seg.pt"
+    MODEL_PATH = "models/yolo11l-seg.pt"
     
     # Configure background effects
     bg_config = BackgroundConfig(
