@@ -209,3 +209,6 @@ input.mkv
 input.mp4
 extracted_faces
 models/
+crop_data.json
+final_simple_edit.mp4
+output_from_auto_crop_9x16.mp4

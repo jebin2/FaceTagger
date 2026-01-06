@@ -1,0 +1,5 @@
+numpy
+opencv-python-headless
+ultralytics
+torch
+git+https://github.com/jebin2/custom_logger.git
