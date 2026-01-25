@@ -9,7 +9,7 @@ class YOLOPersonManager(DetectManager):
     Automatically loads and cleans up.
     Returns embeddings using face_recognition on detected faces.
     """
-    def __init__(self, model_path='models/yolo12m.pt', conf_threshold=0.5):
+    def __init__(self, model_path='models/yolo26m.pt', conf_threshold=0.5):
         super().__init__()
         self.model_path = model_path
         self.conf_threshold = conf_threshold

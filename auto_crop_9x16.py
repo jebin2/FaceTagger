@@ -48,7 +48,7 @@ class DetectionModels:
     """Manages YOLO detection models"""
     
     def __init__(self, face_model_path: str = "models/yolov12l-face.pt", 
-                 person_model_path: str = "models/yolo12l.pt"):
+                 person_model_path: str = "models/yolo26l.pt"):
         self.face_model = YOLO(face_model_path)
         self.person_model = YOLO(person_model_path)
     

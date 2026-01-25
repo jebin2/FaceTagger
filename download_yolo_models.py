@@ -6,11 +6,11 @@ MODELS_DIR = "models"
 MIN_SIZE_MB = 5
 
 MODELS = {
-    "yolo11l-seg.pt": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l-seg.pt",
-    "yolo12l.pt": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12l.pt",
-    "yolo12m.pt": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12m.pt",
+    "yolo26l-seg.pt": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26l-seg.pt",
+    "yolo26l.pt": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26l.pt",
+    "yolo26m.pt": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26m.pt",
     "yolov12l-face.pt": "https://github.com/YapaLab/yolo-face/releases/download/v0.0.0/yolov12l-face.pt",
-    "yolov8s-seg.pt": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8s-seg.pt",
+    "yolo26s-seg.pt": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-seg.pt",
     "yolov8x6_animeface.pt": "https://huggingface.co/Fuyucchi/yolov8_animeface/resolve/main/yolov8x6_animeface.pt",
 }
 
