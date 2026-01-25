@@ -52,7 +52,7 @@ class FaceDINOManager(DetectManager):
         from ultralytics import YOLO
         """Load YOLO model for person detection."""
         if not hasattr(self, "yolo_model") or self.yolo_model is None:
-            self.yolo_model = YOLO("yolov12l-face.pt")  # change path if needed
+            self.yolo_model = YOLO("yolov26n-face.pt")  # change path if needed
 
     def get_person_bboxes(self, frame):
         """

@@ -47,8 +47,7 @@ class CropConfig:
 class DetectionModels:
     """Manages YOLO detection models"""
     
-    def __init__(self, face_model_path: str = "models/yolov12l-face.pt", 
-                 person_model_path: str = "models/yolo26l.pt"):
+    def __init__(self, face_model_path: str = "models/yolov26n-face.pt", person_model_path: str = "models/yolo26l.pt"):
         self.face_model = YOLO(face_model_path)
         self.person_model = YOLO(person_model_path)
     
@@ -583,7 +582,7 @@ def main():
     is_anime = (mode == "anime")
     CROP_JSON = "crop_data.json"
     OUTPUT_VIDEO = "output_from_auto_crop_9x16.mp4"
-    face_model_path = "models/yolov8x6_animeface.pt" if is_anime else "models/yolov12l-face.pt"
+    face_model_path = "models/yolov8x6_animeface.pt" if is_anime else "models/yolov26n-face.pt"
     
     config = CropConfig(
         target_width=1080,

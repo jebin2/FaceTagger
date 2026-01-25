@@ -9,7 +9,7 @@ MODELS = {
     "yolo26l-seg.pt": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26l-seg.pt",
     "yolo26l.pt": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26l.pt",
     "yolo26m.pt": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26m.pt",
-    "yolov12l-face.pt": "https://github.com/YapaLab/yolo-face/releases/download/1.0.0/yolo26n-face.pt",
+    "yolov26n-face.pt": "https://github.com/YapaLab/yolo-face/releases/download/1.0.0/yolo26n-face.pt",
     "yolo26s-seg.pt": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-seg.pt",
     "yolov8x6_animeface.pt": "https://huggingface.co/Fuyucchi/yolov8_animeface/resolve/main/yolov8x6_animeface.pt",
 }
