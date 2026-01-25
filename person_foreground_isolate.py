@@ -13,6 +13,19 @@ from typing import Optional, List, Tuple
 from dataclasses import dataclass
 from custom_logger import logger_config
 
+# --- Monkey Patch for Custom YOLO Models ---
+# The models yolo26*.pt use custom class names (Segment26, Proto26)
+# that don't exist in standard ultralytics. We map them to standard classes.
+try:
+    from ultralytics.nn.modules import head, block
+    if not hasattr(head, 'Segment26'):
+        head.Segment26 = head.Segment
+    if not hasattr(block, 'Proto26'):
+        block.Proto26 = block.Proto
+except ImportError:
+    pass  # specific ultralytics version might have different structure
+# -------------------------------------------
+
 @dataclass
 class BackgroundConfig:
     """Configuration for background processing"""
