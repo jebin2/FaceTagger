@@ -639,6 +639,12 @@ def renumber_person_folders(output_path):
 
 
 if __name__ == "__main__":
+	try:
+		import download_yolo_models
+		download_yolo_models.download_all_models()
+	except Exception as e:
+		logger.warning(f"Could not check/download models: {e}")
+
 	detect_type = "moondream2"
 	
 	# Performance settings

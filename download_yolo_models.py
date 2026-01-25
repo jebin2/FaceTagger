@@ -45,8 +45,11 @@ def download(name, url):
     print(f"✅ Saved {name} ({size:.1f} MB)")
 
 
-if __name__ == "__main__":
+def download_all_models():
+    print(f"Checking {len(MODELS)} models...")
     for name, url in MODELS.items():
         download(name, url)
+    print("\n🎉 All YOLO models check/download complete")
 
-    print("\n🎉 All YOLO models downloaded successfully")
+if __name__ == "__main__":
+    download_all_models()

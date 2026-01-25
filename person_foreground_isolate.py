@@ -464,4 +464,10 @@ def main():
 
 
 if __name__ == "__main__":
+    try:
+        import download_yolo_models
+        download_yolo_models.download_all_models()
+    except Exception as e:
+        print(f"Could not check/download models: {e}")
+
     main()
