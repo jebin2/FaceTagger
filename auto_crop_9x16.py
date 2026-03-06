@@ -482,11 +482,11 @@ class VideoRenderer:
         print(f"Max stretch ratio: {self.config.max_stretch_ratio}x")
         
         # Initialize video writer
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"avc1")
         out = cv2.VideoWriter(
-            self.output_path, 
-            fourcc, 
-            self.fps, 
+            self.output_path,
+            fourcc,
+            24,
             (self.config.target_width, self.config.target_height)
         )
         
