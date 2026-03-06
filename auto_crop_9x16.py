@@ -523,12 +523,15 @@ class VideoRenderer:
         cap.release()
         out.release()
 
-        # Re-encode to H.264 at fixed 24fps for clean concat compatibility
-        utils.run_ffmpeg([
-            "ffmpeg", "-y", "-i", tmp_path,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-vf", "fps=24",
-            "-an", self.output_path
-        ])
+        # Re-encode with shared deterministic settings for clip compatibility.
+        utils.encode_video_consistent(
+            input_path=tmp_path,
+            output_path=self.output_path,
+            fps=24,
+            crf=18,
+            preset="fast",
+            include_audio=False
+        )
         os.remove(tmp_path)
 
         print(f"Final vertical video saved: {self.output_path}")
