@@ -13,6 +13,7 @@ import json
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 from custom_logger import logger_config
+from jebin_lib import utils
 
 
 @dataclass
@@ -523,12 +524,11 @@ class VideoRenderer:
         out.release()
 
         # Re-encode to H.264 at fixed 24fps for clean concat compatibility
-        import subprocess
-        subprocess.run([
+        utils.run_ffmpeg([
             "ffmpeg", "-y", "-i", tmp_path,
             "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-vf", "fps=24",
             "-an", self.output_path
-        ], check=True)
+        ])
         os.remove(tmp_path)
 
         print(f"Final vertical video saved: {self.output_path}")
