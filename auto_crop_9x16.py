@@ -7,6 +7,7 @@ the final vertical video with blurred background for aspect ratio preservation.
 
 import cv2
 import numpy as np
+import os
 from ultralytics import YOLO
 import json
 from typing import List, Tuple, Optional
@@ -481,45 +482,55 @@ class VideoRenderer:
         print(f"Output size: {self.config.target_width}x{self.config.target_height}")
         print(f"Max stretch ratio: {self.config.max_stretch_ratio}x")
         
-        # Initialize video writer
-        fourcc = cv2.VideoWriter_fourcc(*"avc1")
+        # Write raw frames with mp4v (widely supported in OpenCV)
+        tmp_path = self.output_path + ".tmp.mp4"
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         out = cv2.VideoWriter(
-            self.output_path,
+            tmp_path,
             fourcc,
             24,
             (self.config.target_width, self.config.target_height)
         )
-        
+
         frame_id = 0
-        
+
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-            
+
             # Get crop position for this frame
             left = self.crop_positions[frame_id]
             right = left + self.config.target_width
-            
+
             # Ensure valid bounds
             left = max(0, min(left, self.orig_w - self.config.target_width))
             right = left + self.config.target_width
-            
+
             # Crop horizontally
             cropped = frame[:, left:right]
-            
+
             # Render with blur background if needed
             final_frame = self.render_frame_with_blur(cropped)
-            
+
             out.write(final_frame)
             frame_id += 1
-            
+
             if (frame_id) % 100 == 0:
                 print(f"Rendered {frame_id}/{frame_count} frames")
-        
+
         cap.release()
         out.release()
-        
+
+        # Re-encode to H.264 at fixed 24fps for clean concat compatibility
+        import subprocess
+        subprocess.run([
+            "ffmpeg", "-y", "-i", tmp_path,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-vf", "fps=24",
+            "-an", self.output_path
+        ], check=True)
+        os.remove(tmp_path)
+
         print(f"Final vertical video saved: {self.output_path}")
     
     def run(self):
